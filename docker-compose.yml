@@ -1,0 +1,22 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      # 模型名 / 管理员账号 / JWT 等非密钥配置（API Key 走网页端配置，存 SQLite data 卷）。
+      # required:false —— 没有 backend/.env 也能起，用下面的默认值。
+      - path: backend/.env
+        required: false
+    environment:
+      # 非密钥默认值；可被根目录 .env 或 shell 环境变量覆盖。
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-flash}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v3}
+    volumes:
+      # 持久化：快照 JSON / 向量库 / SQLite 用户库（重启不丢）
+      - ./backend/data:/app/data
+    restart: unless-stopped

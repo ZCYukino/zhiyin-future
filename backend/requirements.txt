@@ -1,0 +1,21 @@
+# Web framework
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+
+# LLM (DeepSeek + DashScope, OpenAI-compatible)
+openai>=1.30
+
+# Vector store
+chromadb>=0.4.24
+
+# Crawler / HTML parsing
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.1
+
+# Config / utils
+python-dotenv>=1.0
+
+# JWT auth
+PyJWT>=2.8

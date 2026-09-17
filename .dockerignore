@@ -1,0 +1,18 @@
+# 依赖与构建产物
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/*.pyc
+
+# 版本控制与 IDE
+**/.git
+.idea
+
+# 敏感配置与本地数据（不进镜像）
+backend/.env
+backend/data
+
+# 前端调试临时文件（headless 截图 / CDP 探针脚本）
+zcFrontend/tmp_*
+zcFrontend/.tmp_*
