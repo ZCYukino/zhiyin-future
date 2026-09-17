@@ -1,0 +1,16 @@
+# .env 存模型名 / 服务地址 / 管理员账号 / JWT_SECRET 等本机配置（API Key 不在其中，
+# 走网页端配置存 SQLite）。每台机器不同，不提交；仓库只提供 .env.example 模板。
+.env
+
+# 数据落地（快照 JSON + 向量库 + SQLite 用户库含 API Key，本地生成，不入库）
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 测试产物
+.coverage
+.pytest_cache/
+htmlcov/

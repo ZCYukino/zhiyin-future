@@ -1,0 +1,16 @@
+[run]
+# 只统计 app 包内可单测的业务逻辑；I/O 与 HTTP/基础设施层不在单元测试覆盖口径内。
+source = app
+omit =
+    app/server.py
+    app/db.py
+    app/store.py
+    app/rag.py
+    app/crawler/sources.py
+    app/enrich.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError

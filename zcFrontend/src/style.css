@@ -1,0 +1,296 @@
+:root {
+  /* 主色调 — 纸张墨色系 */
+  --color-primary: #3b2412;
+  --color-primary-light: #5a3d28;
+  --color-primary-dark: #2a1a0e;
+  --color-primary-bg: #f5efe3;
+
+  /* Element Plus 主题覆盖 */
+  --el-color-primary: #3b2412;
+  --el-color-primary-light-3: #5a3d28;
+  --el-color-primary-light-5: #8a7560;
+  --el-color-primary-light-7: #c4b8a8;
+  --el-color-primary-light-8: #ddd5c9;
+  --el-color-primary-light-9: #f0ebe2;
+  --el-color-primary-dark-2: #2a1a0e;
+
+  /* 语义色 */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #6b7280;
+
+  /* 中性色 */
+  --color-text-primary: #1e293b;
+  --color-text-regular: #475569;
+  --color-text-secondary: #94a3b8;
+  --color-text-placeholder: #cbd5e1;
+  --color-border: #e2e8f0;
+  --color-bg-page: #f4e9d6;
+  --color-bg-card: #fbf3e2;
+
+  /* 纸张系统 */
+  --paper-bg-solid: #f9f0dc;
+  --paper-bg-deep: #f3e6cb;
+  --paper-border: rgba(87, 64, 36, 0.10);
+  --paper-edge: rgba(87, 64, 36, 0.06);
+  --paper-shadow:
+    0 20px 40px rgba(64, 45, 20, 0.06),
+    0 8px 14px rgba(64, 45, 20, 0.03),
+    inset 0 0 0 1px rgba(255, 252, 246, 0.78),
+    inset 14px 0 18px -18px rgba(87, 64, 36, 0.09),
+    inset -14px 0 18px -18px rgba(87, 64, 36, 0.09),
+    inset 0 16px 18px -18px rgba(87, 64, 36, 0.06),
+    inset 0 -18px 20px -18px rgba(87, 64, 36, 0.09);
+  --paper-shadow-hover:
+    0 24px 50px rgba(64, 45, 20, 0.09),
+    0 10px 18px rgba(64, 45, 20, 0.04),
+    inset 0 0 0 1px rgba(255, 252, 246, 0.82),
+    inset 16px 0 20px -18px rgba(87, 64, 36, 0.11),
+    inset -16px 0 20px -18px rgba(87, 64, 36, 0.11),
+    inset 0 18px 20px -18px rgba(87, 64, 36, 0.07),
+    inset 0 -20px 22px -18px rgba(87, 64, 36, 0.11);
+
+  /* 圆角 */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.07);
+
+  /* 过渡 */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.25s ease;
+  --transition-slow: 0.4s ease;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  background-color: var(--color-bg-page);
+  background-image:
+    repeating-linear-gradient(0deg, rgba(87, 64, 36, 0.014) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, rgba(87, 64, 36, 0.014) 0 1px, transparent 1px 4px),
+    radial-gradient(ellipse 600px 400px at 10% 0%, rgba(120, 80, 30, 0.05), transparent 70%),
+    radial-gradient(ellipse 600px 400px at 90% 100%, rgba(120, 80, 30, 0.05), transparent 70%);
+  color: var(--color-text-primary);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ===== 信纸/旧纸张 — 可复用纸面 ===== */
+.paper-surface {
+  position: relative;
+  background:
+    radial-gradient(ellipse 80px 60px at 0% 0%, rgba(120, 80, 30, 0.14), transparent 70%),
+    radial-gradient(ellipse 80px 60px at 100% 0%, rgba(120, 80, 30, 0.12), transparent 70%),
+    radial-gradient(ellipse 90px 70px at 0% 100%, rgba(120, 80, 30, 0.16), transparent 70%),
+    radial-gradient(ellipse 90px 70px at 100% 100%, rgba(120, 80, 30, 0.14), transparent 70%),
+    var(--color-bg-card);
+  border: 1px solid rgba(87, 64, 36, 0.34);
+  box-shadow:
+    0 24px 50px rgba(64, 45, 20, 0.18),
+    0 10px 20px rgba(64, 45, 20, 0.10),
+    inset 0 0 0 1px rgba(255, 252, 240, 0.55),
+    inset 0 0 0 5px rgba(251, 243, 226, 1),
+    inset 0 0 0 6px rgba(87, 64, 36, 0.28);
+}
+.paper-surface::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(87, 64, 36, 0.018) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(87, 64, 36, 0.018) 0 1px, transparent 1px 3px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 内层小卡片 — 加强边框 + 内高光 */
+.paper-inner {
+  border: 1px solid rgba(87, 64, 36, 0.22);
+  background: rgba(251, 243, 226, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(255, 252, 240, 0.4);
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+a { text-decoration: none; color: inherit; }
+ul, ol { list-style: none; }
+
+/* NProgress */
+#nprogress .bar {
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-light)) !important;
+  height: 3px !important;
+}
+
+/* Element Plus 全局覆盖 */
+.el-button--primary {
+  --el-button-bg-color: var(--color-primary) !important;
+  --el-button-border-color: var(--color-primary) !important;
+  --el-button-hover-bg-color: var(--color-primary-light) !important;
+  --el-button-hover-border-color: var(--color-primary-light) !important;
+}
+
+/* Element Plus Dropdown */
+.el-dropdown-menu {
+  background: #fbf3e2 !important;
+  border: 1px solid rgba(26, 26, 26, 0.10) !important;
+  border-radius: 2px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06) !important;
+  padding: 4px 0 !important;
+}
+
+.el-dropdown-menu__item {
+  font-family: 'SimSun', 'Songti SC', 'STSong', 'Noto Serif SC', serif !important;
+  font-size: 13px !important;
+  color: #1a1a1a !important;
+  letter-spacing: 0.5px !important;
+}
+
+.el-dropdown-menu__item:hover {
+  background: rgba(26, 26, 26, 0.03) !important;
+  color: #1a1a1a !important;
+}
+
+/* ===== 修改密码弹窗（信纸/墨色） =====
+   注意：el-dialog 默认 <teleport to="body">，根元素不携带父组件 scope-id，
+   故 scoped 的 `.paper-dialog :deep(.el-dialog)` 永远匹配不到（class 与 el-dialog 同在根节点）。
+   必须用全局非 scoped 选择器（`.el-dialog.paper-dialog` 同节点 / `.paper-dialog .el-dialog__*` 后代）。 */
+.el-dialog.paper-dialog,
+.paper-dialog .el-dialog {
+  border-radius: 2px !important;
+  background: #fbf3e2 !important;
+  border: 1px solid rgba(87, 64, 36, 0.34) !important;
+  box-shadow:
+    0 24px 50px rgba(64, 45, 20, 0.20),
+    0 10px 20px rgba(64, 45, 20, 0.10),
+    inset 0 0 0 1px rgba(255, 252, 240, 0.55),
+    inset 0 0 0 5px rgba(251, 243, 226, 1),
+    inset 0 0 0 6px rgba(87, 64, 36, 0.28) !important;
+  font-family: 'SimSun', 'Songti SC', 'STSong', 'Noto Serif SC', serif !important;
+}
+
+.paper-dialog .el-dialog__header {
+  border-bottom: 1px dashed rgba(87, 64, 36, 0.32) !important;
+  padding: 18px 24px !important;
+}
+
+.paper-dialog .el-dialog__title {
+  font-family: 'SimSun', 'Songti SC', serif !important;
+  font-weight: 700 !important;
+  letter-spacing: 2px !important;
+  color: #3b2412 !important;
+}
+
+.paper-dialog .el-dialog__body {
+  padding: 24px !important;
+}
+
+.paper-dialog .el-dialog__footer {
+  padding: 0 24px 20px !important;
+}
+
+.paper-dialog .el-input__wrapper {
+  background: rgba(255, 253, 243, 0.94) !important;
+  box-shadow: 0 0 0 1px rgba(87, 64, 36, 0.32) inset !important;
+}
+.paper-dialog .el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px rgba(87, 64, 36, 0.5) inset !important;
+}
+.paper-dialog .el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px #3b2412 inset !important;
+}
+.paper-dialog .el-input__inner {
+  font-family: 'SimSun', 'Songti SC', serif !important;
+  color: #3b2412 !important;
+}
+.paper-dialog .el-input__inner::placeholder {
+  color: rgba(87, 64, 36, 0.62) !important;
+}
+
+.paper-dialog .el-button {
+  font-family: 'SimSun', 'Songti SC', serif !important;
+  letter-spacing: 1px !important;
+  border-radius: 2px !important;
+}
+.paper-dialog .el-button--default {
+  background: rgba(250, 242, 222, 0.9) !important;
+  border: 1px solid rgba(87, 64, 36, 0.42) !important;
+  color: #5a3d28 !important;
+  box-shadow: 0 2px 6px rgba(64, 45, 20, 0.1), inset 0 0 0 1px rgba(255, 252, 240, 0.5) !important;
+}
+.paper-dialog .el-button--default:hover {
+  background: rgba(87, 64, 36, 0.08) !important;
+  border-color: rgba(87, 64, 36, 0.5) !important;
+  color: #3b2412 !important;
+}
+
+/* 人岗匹配 岗位搜索下拉面板（el-select popper teleport 到 body，须全局选择器） */
+.job-select-popper {
+  background: #fbf3e2 !important;
+  border: 1px solid rgba(87, 64, 36, 0.34) !important;
+  box-shadow: 0 12px 32px rgba(64, 45, 20, 0.18) !important;
+  border-radius: 2px !important;
+}
+.job-select-popper .el-select-dropdown__item {
+  color: #3b2412 !important;
+  font-family: 'SimSun', 'Songti SC', serif !important;
+  height: auto !important;
+  padding: 9px 16px !important;
+}
+.job-select-popper .el-select-dropdown__item.is-hovering {
+  background: rgba(87, 64, 36, 0.08) !important;
+}
+.job-select-popper .el-select-dropdown__item.is-selected {
+  color: #3b2412 !important;
+  background: rgba(250, 243, 224, 0.9) !important;
+}
+.job-select-popper .el-popper__arrow::before {
+  background: #fbf3e2 !important;
+  border-color: rgba(87, 64, 36, 0.34) !important;
+}
+
+/* 钢笔光标 */
+:root {
+  --pen-cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M3 21l1.5-4.5L17.3 3.7a1 1 0 011.4 0l1.6 1.6a1 1 0 010 1.4L7.5 19.5z' fill='%231a1a1a' opacity='0.7'/%3E%3C/svg%3E") 2 14, text;
+}
+
+input:not([type="radio"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"]):not([type="submit"]):not([type="button"]),
+textarea {
+  cursor: var(--pen-cursor) !important;
+  caret-color: #1a1a1a;
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #c1c9d2; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #a8b2bc; }
+
+/* ===== 全局统一关键帧（多处曾重复定义且数值漂移，收敛到此处唯一来源）===== */
+@keyframes card-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes drift-left {
+  0%   { transform: translateX(110vw); }
+  50%  { transform: translateX(40vw); }
+  100% { transform: translateX(-22vw); }
+}
+@keyframes drift-right {
+  0%   { transform: translateX(-22vw); }
+  50%  { transform: translateX(40vw); }
+  100% { transform: translateX(110vw); }
+}

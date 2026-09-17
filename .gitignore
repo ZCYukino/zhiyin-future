@@ -1,0 +1,33 @@
+# IDE 本地配置
+.idea/
+.vscode/
+*.iml
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# Office 临时锁文件
+~$*
+
+# 日志
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# 说明：backend/.env 不再提交（API Key 已改为页面配置，存 SQLite data/users.db）。
+# 此处不再忽略 .env 的注释已移除；如本地有 .env 请勿提交。
+
+# 部署产物 / 构建缓存
+deploy.tar.gz
+*.tsbuildinfo
+
+# 临时探测目录（CDP / headless 验证残留）
+tmp_cdp_probe*/
+zcFrontend/tmp_*.png
+
+# 误生成的构建配置产物（由 tsc -b 或误编译产生）
+zcFrontend/vite.config.js
+zcFrontend/vite.config.d.ts
