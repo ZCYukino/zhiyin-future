@@ -16,7 +16,6 @@ def _job(desc: str, city: str = "") -> RawJob:
     return RawJob(title="测试岗位", description=desc, city=city)
 
 
-# ===== denoise =====
 def test_denoise_removes_noise_lines():
     text = "岗位职责：负责后端开发。\n五险一金、带薪年假、节日福利\n联系人：张三 13800138000\n领导交办的其他事项\n熟悉 Python 与 MySQL。"
     out = denoise(text)
@@ -32,7 +31,6 @@ def test_denoise_keeps_clean_lines():
     assert denoise(text) == text
 
 
-# ===== normalize_city =====
 def test_normalize_city_province_dropped():
     assert normalize_city("广东省") == ""
     assert normalize_city("内蒙古自治区") == ""
@@ -58,7 +56,6 @@ def test_normalize_city_passthrough_and_empty():
     assert normalize_city("") == ""
 
 
-# ===== _similarity / deduplicate =====
 def test_similarity():
     assert _similarity("", "x") == 0.0
     assert _similarity("abc", "abc") == 1.0
@@ -74,7 +71,6 @@ def test_deduplicate_keeps_distinct():
     assert len(deduplicate(jobs)) == 2
 
 
-# ===== cross_validate_skills =====
 def test_cross_validate_support():
     lists = [["Python", "Java"], ["Python", "Go"], ["Java", "C++"]]
     assert sorted(cross_validate_skills(lists, min_support=2)) == ["Java", "Python"]
@@ -85,7 +81,6 @@ def test_cross_validate_min_support_one():
     assert sorted(cross_validate_skills(lists, min_support=1)) == ["Java", "Python"]
 
 
-# ===== clean_pipeline =====
 def test_clean_pipeline_drops_short_and_normalizes():
     jobs = [
         _job("岗位职责：负责后端服务端架构设计与核心业务开发，熟悉高并发与数据库优化，具备良好工程能力。", "北京市"),

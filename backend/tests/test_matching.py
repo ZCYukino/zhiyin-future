@@ -19,13 +19,11 @@ from app.matching import (
 )
 
 
-# ===== normalize_skill_name =====
 def test_normalize_skill_name():
     assert normalize_skill_name("Python（高级）") == "python"
     assert normalize_skill_name("  Java\t") == "java"
 
 
-# ===== contains_match =====
 def test_contains_match_ascii_exact():
     assert contains_match("Python", "python") is True
     assert contains_match("Java", "JavaScript") is False
@@ -46,7 +44,6 @@ def test_contains_match_empty():
     assert contains_match("", "x") is False
 
 
-# ===== shared_substring =====
 def test_shared_substring_chinese():
     assert shared_substring("机器学习", "深度学习") is True
     assert shared_substring("Go", "MongoDB") is False
@@ -54,12 +51,7 @@ def test_shared_substring_chinese():
 
 
 def test_shared_substring_rejects_lookalike_language_prefix():
-    """Java ⊄ JavaScript：ASCII 前缀规则不能把「看着像」当「同一族」。
-
-    旧实现只要「短词是长词前缀」就判 partial，于是简历里写了 Java 的人，
-    岗位技能点「JavaScript」会显示成「部分掌握」——两者毫无关系。
-    真正的同族前缀（Spring ⊂ Spring Boot）必须保留。
-    """
+    """Java ⊄ JavaScript：ASCII 前缀规则不能把「看着像」当「同一族」。"""
     assert shared_substring("Java", "JavaScript") is False
     assert shared_substring("JavaScript", "Java") is False
     # 反向不得误伤：真正的同族前缀（Elastic ⊂ Elasticsearch）照旧判 partial
@@ -69,12 +61,7 @@ def test_shared_substring_rejects_lookalike_language_prefix():
 
 
 def test_shared_substring_rejects_single_generic_morpheme():
-    """只共用一个高频构词成分，不算「措辞相近」。
-
-    真实事故（本仓库真实简历跑出来的「部分掌握」一列）：原理图设计~原型设计、
-    高性能计算~计算机视觉、配置管理工具~项目管理、系统性能优化~操作系统——
-    全部只共用「设计 / 计算 / 管理 / 系统」一个泛词，却各计 0.6 分。
-    """
+    """只共用一个高频构词成分，不算「措辞相近」。"""
     assert shared_substring("原理图设计", "原型设计") is False
     assert shared_substring("高性能计算", "计算机视觉") is False
     assert shared_substring("配置管理工具", "项目管理") is False
@@ -87,7 +74,6 @@ def test_shared_substring_rejects_single_generic_morpheme():
     assert shared_substring("数据标注", "标注质检") is True   # 共「标注」
 
 
-# ===== skill_parts：技能点怎么拆成可匹配的组成项 =====
 def test_skill_parts_expands_parenthetical():
     conj, alts = skill_parts("AI基础概念（机器学习、深度学习、大模型、RAG）")
     assert conj == []  # 没有「与/和/及」，不是合取
@@ -95,11 +81,7 @@ def test_skill_parts_expands_parenthetical():
 
 
 def test_skill_parts_splits_compound_by_connector():
-    """复合技能点按连接词拆成组成项（合取）。
-
-    「服务端部署与维护」整体既不是「服务端部署」也不是「部署」的超串，
-    简历只写了其中一项时双向子串都够不着 —— 不拆开就永远判不出。
-    """
+    """复合技能点按连接词拆成组成项（合取）。"""
     assert skill_parts("服务端部署与维护") == (["服务端部署", "维护"], [])
     assert skill_parts("模型剪枝与知识蒸馏") == (["模型剪枝", "知识蒸馏"], [])
     assert skill_parts("监控与日志分析工具（如Prometheus、Grafana、ELK）")[0] == ["监控", "日志分析工具"]
@@ -110,11 +92,7 @@ def test_skill_parts_splits_compound_by_connector():
 
 
 def test_contains_match_separated_vs_joined_ascii():
-    """分开写 vs 连写是同一个词：简历写「Vue 3+TypeScript」、岗位技能点写「Vue3」。
-
-    旧实现按 token 精确比对，'vue 3' → {vue, 3} 与 'Vue3' → {vue3} 一个都对不上，
-    于是「Vue3」被判未掌握。node.js ≡ nodejs 同理。
-    """
+    """分开写 vs 连写是同一个词：简历写「Vue 3+TypeScript」、岗位技能点写「Vue3」。"""
     assert contains_match("Vue3", "Vue 3") is True
     assert contains_match("Vue3", "vue3") is True
     assert contains_match("Node.js", "NodeJS") is True
@@ -124,14 +102,8 @@ def test_contains_match_separated_vs_joined_ascii():
     assert contains_match("CiCd", "C I D") is False
 
 
-# ===== 简历正文直扫：不依赖前端词典的第二证据来源 =====
 def test_term_in_text_matches_verbatim():
-    """岗位技能词逐字出现在简历里就算数，与词典收没收这个词无关。
-
-    真实事故：前端那份技能词典是人工维护的固定表，岗位技能点里只要出现没收录的词
-    （家电控制器开发经验 / 量子算法 / 环境适应性测试…），简历原文写了也判未掌握——
-    实测 30 个岗位里有 17 个，即使候选人把岗位要求的技能一条不差写进简历也认不全。
-    """
+    """岗位技能词逐字出现在简历里就算数，与词典收没收这个词无关。"""
     segs = text_segments("技能清单：家电控制器开发经验、量子算法、环境适应性测试")
     assert _term_in_text("家电控制器开发经验", segs) is True
     assert _term_in_text("量子算法", segs) is True
@@ -155,12 +127,7 @@ def test_term_in_text_does_not_cross_segments():
 
 
 def test_parenthetical_content_is_scannable():
-    """括号内容也要能扫到。
-
-    回归：`text_segments` 原本把括号内容整段丢掉，而技能点「数据标注质量评估
-    （IAA与置信度建模）」的合取项恰恰**只存在于括号里** —— 简历逐字写了这一整条，
-    依然判未掌握。修法是每个句段额外产出「括号内容」作为一个独立句段。
-    """
+    """括号内容也要能扫到，每个句段额外产出「括号内容」作为独立句段。"""
     segs = text_segments("技能清单：数据标注质量评估（IAA与置信度建模）")
     assert _term_in_text("IAA", segs) is True
     assert _term_in_text("置信度建模", segs) is True
@@ -171,11 +138,7 @@ def test_parenthetical_content_is_scannable():
 
 
 def test_connector_split_does_not_cut_inside_words():
-    """连接词拆词不能把词从中间劈开。
-
-    回归：技能点「SRC参与经验」被按「与」切成 ['src参', '经验'] ——「参与」的「与」
-    被当成并列连接词。碎片『经验』随后在正文里命中「经验回放」，把这条技能点误判成掌握。
-    """
+    """连接词拆词不能把词从中间劈开（如「参与」的「与」不是连接词）。"""
     assert skill_parts("SRC参与经验") == ([], [])
     # 「以及 / 涉及」这类词里的及不是连接词，整串保持原子
     assert skill_parts("以及安全合规") == ([], [])
@@ -189,12 +152,7 @@ def test_connector_split_does_not_cut_inside_words():
 
 
 def test_short_fragment_in_prose_is_not_evidence():
-    """2 字片段在散文里到处都有，不构成「正文直扫」的证据。
-
-    回归：「安全与合规（DevSecOps）」拆出的『安全』『合规』，
-    被「负责网络安全测试与数据合规审查」这句毫不相干的话命中，判成已掌握。
-    词典路径不受此限（词典是人工维护的，收进去的词本身就是证据）。
-    """
+    """2 字片段在散文里到处都有，不构成「正文直扫」的证据。"""
     segs = text_segments("负责网络安全测试与数据合规审查，熟悉等保要求")
     assert classify_skill("安全与合规（DevSecOps）", [], segs) == "missing"
     # 够长的片段照旧算数
@@ -204,11 +162,7 @@ def test_short_fragment_in_prose_is_not_evidence():
 
 
 def test_build_match_report_survives_malformed_user_payload(monkeypatch):
-    """未鉴权接口上的畸形 body 不能 500。
-
-    回归：userSkills 里放非字符串会走到 u.strip() 抛 AttributeError；
-    resumeText / education 放数字会走进 re / `in` 抛 TypeError。
-    """
+    """未鉴权接口上的畸形 body 不能 500。"""
     snap = {"jobs": [{"id": "1", "name": "x", "skills": ["Java"]}],
             "jobSkillProgression": {}, "jobRequirements": {}}
     monkeypatch.setattr(matching, "_llm_plan", lambda *a, **k: None)
@@ -230,11 +184,7 @@ def test_shared_substring_ignores_absurdly_long_input():
 
 
 def test_verbatim_full_skill_point_is_mastered_without_dictionary():
-    """简历逐字写全了技能点名称 → 掌握，即使一条合取项都没单独出现。
-
-    回归：有合取项时原本完全不看本体，于是「简历里明明白白写着这条技能点」
-    也会被判成 partial / missing。
-    """
+    """简历逐字写全了技能点名称 → 掌握，即使合取项都没单独出现。"""
     for name in [
         "数据标注质量评估（IAA与置信度建模）",
         "容器化技术（Docker）与编排工具（Kubernetes）的基础应用",
@@ -258,11 +208,7 @@ def test_verbatim_does_not_bypass_conjunction():
 
 
 def test_term_in_text_strips_parentheses():
-    """岗位词跨括号时也要能扫到。
-
-    技能点「容器化技术（Docker）与编排工具（Kubernetes）的基础应用」拆出的
-    「编排工具的基础应用」在原文里被括号隔断，两边都去括号才连得上。
-    """
+    """岗位词跨括号时也要能扫到，两边都去括号才连得上。"""
     segs = text_segments("容器化技术（Docker）与编排工具（Kubernetes）的基础应用")
     assert _term_in_text("编排工具的基础应用", segs) is True
 
@@ -276,10 +222,7 @@ def test_classify_skill_uses_resume_text_as_second_evidence():
 
 
 def test_build_match_report_recognizes_unknown_vocabulary(monkeypatch):
-    """端到端：整条岗位词表都不在任何前端词典里，只要简历写了就得给满分。
-
-    这是「以后新采集的岗位」的保证——岗位怎么变、冒出什么新词，都成立。
-    """
+    """整条岗位词表都不在词典里，只要简历写了就得给满分。"""
     snap = {
         "jobs": [{"id": "9", "name": "空调电控工程师", "categoryId": "embedded",
                   "skills": ["家电控制器开发经验", "空调控制器开发经验", "PMSM/BLDC控制调试经验"]}],
@@ -301,13 +244,7 @@ def test_build_match_report_recognizes_unknown_vocabulary(monkeypatch):
 
 
 def test_containment_direction_decides_mastery():
-    """包含关系要分方向：简历比岗位笼统时，只有「简历词是岗位词的前缀」才算掌握。
-
-    中文复合词中心语在后，前缀补进来的是角色/抽象名词，后缀或中间补进来的是
-    限定性修饰语——后者缩小了范围，笼统的说法证明不了它。
-    真实事故：简历写「工作流」（Dify/Coze 编排），岗位技能点「标注工作流设计」
-    被判成已掌握；简历写「算法」，岗位「量子算法」「数值优化算法」判成已掌握。
-    """
+    """包含关系要分方向：简历比岗位笼统时，只有「简历词是岗位词的前缀」才算掌握。"""
     # 岗位词 ⊃ 简历词，且简历词是前缀 → 掌握（补进来的是角色/抽象名词）
     assert contains_match("机器学习工程师", "机器学习") is True
     assert contains_match("项目管理经验", "项目管理") is True
@@ -325,11 +262,7 @@ def test_containment_direction_decides_mastery():
 
 
 def test_classify_skill_conjunction_requires_all_parts():
-    """「A与B」是合取：只掌握其中一项只能算部分掌握。
-
-    真实事故：岗位「模型量化与剪枝」在简历只有「模型量化」时被判成已掌握；
-    岗位「PMSM/BLDC控制调试经验」等复合技能点同理。
-    """
+    """「A与B」是合取：只掌握其中一项只能算部分掌握。"""
     assert classify_skill("模型量化与剪枝", ["模型量化"]) == "partial"
     assert classify_skill("模型量化与剪枝", ["模型量化", "剪枝"]) == "mastered"
     assert classify_skill("模型剪枝与知识蒸馏", ["知识蒸馏"]) == "partial"
@@ -341,11 +274,7 @@ def test_classify_skill_conjunction_requires_all_parts():
 
 
 def test_parse_years_takes_lower_bound_of_range():
-    """年限区间取**下界**：岗位写「1-3年」表示 1 年即可投递。
-
-    旧实现用 re.search 会抓到区间里最后一个数字，把门槛抬成 3/5 年，
-    1-2 年经验的人被整片误判成不达标。
-    """
+    """年限区间取下界：岗位写「1-3年」表示 1 年即可投递。"""
     assert parse_years("1-3年") == 1
     assert parse_years("3-5年") == 3
     assert parse_years("5年以上") == 5
@@ -372,12 +301,7 @@ def test_skill_parts_splits_ascii_and_slash():
 
 
 def test_classify_skill_matches_parenthetical_content():
-    """回归（真实事故：AI产品经理岗位把写了 RAG 的简历判成未掌握）。
-
-    岗位技能点常把真正可检的技能名塞进括号，括号外只剩话题标签。
-    旧实现只拿 normalize_skill_name()（= 删括号后的本体）去比，于是简历里
-    写了 RAG / 大模型 / 机器学习也恒定「未掌握」。
-    """
+    """岗位技能点常把真正可检的技能名塞进括号，旧实现删括号后匹配不到。"""
     ai = "AI基础概念（机器学习、深度学习、大模型、RAG）"
     # 括号是 4 项举例，覆盖过半才算「掌握这个概念」
     assert classify_skill(ai, ["机器学习", "深度学习"]) == "mastered"
@@ -395,10 +319,8 @@ def test_classify_skill_parenthetical_does_not_overclaim():
     assert classify_skill("标注质检流程设计（Label Studio/CVAT等）", ["Python"]) == "missing"
 
 
-# ===== 中英混排：ASCII 部分不得走中文子串分支 =====
 def test_ascii_token_not_swallowed_by_mixed_cjk_string():
-    """回归：'cvat等' 含中文，旧实现整串走子串分支 → userSkill 'C'（C 语言）
-    以单字符子串命中，把「标注质检流程设计」误判成已掌握。"""
+    """'cvat等' 含中文时 ASCII 部分不得走中文子串分支。"""
     assert contains_match("cvat等", "C") is False
     assert contains_match("C", "cvat等") is False
     assert shared_substring("cvat等", "Java") is False
@@ -406,11 +328,7 @@ def test_ascii_token_not_swallowed_by_mixed_cjk_string():
 
 
 def test_shared_substring_rejects_generic_bigram_only():
-    """回归：2-gram 重叠把「只共用一个常用词」当成「语义相近」。
-
-    真实事故：'向量数据库'（简历有）与「多模态数据一致性校验」只共用「数据」二字，
-    却被算作「部分掌握」，把一列全是噪声的伪差异塞进报告。
-    """
+    """2-gram 重叠不能把「只共用一个常用词」当成「语义相近」。"""
     assert shared_substring("多模态数据一致性校验", "向量数据库") is False
     assert shared_substring("数据标注质量评估", "数据结构") is False
     assert shared_substring("数据分析能力", "向量数据库") is False
@@ -422,9 +340,7 @@ def test_shared_substring_rejects_generic_bigram_only():
 
 
 def test_short_cjk_suffix_in_mixed_name_is_not_evidence():
-    """回归：'Prompt设计' 的中文字段只有 '设计'，对「标注质检流程设计」整串做
-    子串包含会命中 → 两个无关技能被判成同一项。混排串里的 2 字中文后缀
-    不构成技能证据。"""
+    """混排串里的 2 字中文后缀不构成技能证据。"""
     assert contains_match("标注质检流程设计", "Prompt设计") is False
     assert shared_substring("标注质检流程设计", "Prompt设计") is False
     # 反向不得误伤：纯中文技能名的包含关系照旧
@@ -439,13 +355,7 @@ def test_short_cjk_suffix_in_mixed_name_is_not_evidence():
 
 
 def test_generic_ascii_abbreviation_is_not_an_identity():
-    """泛用 ASCII 缩写不构成技能身份。
-
-    回归：简历解析把命中的别名一并交给匹配器后，简历里一句「ai应用」带出 token 'ai'，
-    把岗位技能点「Scale AI平台配置」判成已掌握；一句「LLM」把
-    「LLM生成数据可信度评估」「LLM辅助数据合成」判成已掌握——简历只是提了 LLM，
-    并没做过「LLM 生成数据的可信度评估」。同族的 Java/JavaScript 是另一回事（见 shared_substring）。
-    """
+    """泛用 ASCII 缩写不构成技能身份，简历提过 AI/LLM 不等于做过对应技能点。"""
     assert contains_match("Scale AI平台配置", "ai应用") is False
     assert contains_match("Scale AI平台配置", "AI辅助开发") is False
     assert contains_match("LLM生成数据可信度评估", "llm") is False
@@ -471,12 +381,7 @@ def test_ascii_part_still_matches_across_mixed_strings():
 
 
 def test_classify_skill_is_reflexive_for_typical_skill_points():
-    """不变量：岗位技能点对「自己」必须判已掌握。
-
-    抓的是「收紧规则时误伤自己人」——带括号的长技能点、`C/C++` 这类
-    ASCII 混排、以及中英混排串最容易在收紧子串/2-gram 规则时被误判成
-    partial / missing。全量 223 个真实技能点实测 0 例外。
-    """
+    """不变量：岗位技能点对「自己」必须判已掌握。"""
     for name in [
         "C", "C++", "C/C++", "C语言", "Go", "Java", "JavaScript", "Node.js", "SQL",
         "CI/CD工具（如Jenkins）的使用与配置", "Docker/Kubernetes", "HTML/CSS", "Git/SVN",
@@ -496,14 +401,12 @@ def test_classify_skill_is_reflexive_for_typical_skill_points():
         assert classify_skill(name, [name]) == "mastered", name
 
 
-# ===== classify_skill =====
 def test_classify_skill():
     assert classify_skill("Python", ["Python", "SQL"]) == "mastered"
     assert classify_skill("机器学习", ["深度学习"]) == "partial"
     assert classify_skill("Java", ["Python"]) == "missing"
 
 
-# ===== 辅助函数 =====
 def test_priority_from_level():
     assert priority_from_level("junior") == "must"
     assert priority_from_level("mid") == "important"
@@ -529,7 +432,6 @@ def test_resolve_stack():
     assert _resolve_stack("产品规划", "product") == "product"
 
 
-# ===== build_match_report（mock 快照与 LLM） =====
 _SNAPSHOT = {
     "jobs": [
         {"id": "1", "name": "Java后端工程师", "categoryId": "backend",
@@ -573,7 +475,6 @@ def test_build_match_report_zero_mastery_and_gate(monkeypatch):
     assert report["score"] == 0
     assert report["verdict"] == "weak"
     assert len(report["skillCoverage"]["missing"]) == 3
-    # 学历/经验硬门槛不达标
     assert any(not r["passed"] for r in report["requirements"])
     assert report["llmStatus"] == "no_api_key"
     assert report["oneLineSummary"] is None
@@ -591,7 +492,7 @@ def test_build_match_report_partial(monkeypatch):
 
 def test_build_match_report_hard_gate_demotes_one_level(monkeypatch):
     monkeypatch.setattr(matching, "_llm_plan", lambda *a, **k: None)
-    # 技能全掌握（100 分），但学历/经验不达标：分数不受影响，结论只下调一级（strong→fair），不再封顶 partial
+    # 技能全掌握但门槛不达标：分数不受影响，结论只下调一级
     user = {"userSkills": ["Java", "Spring Boot", "MySQL"], "education": "大专", "resumeYears": "0年"}
     report = build_match_report("1", user, snapshot=_SNAPSHOT)
     assert report["score"] == 100
@@ -616,7 +517,7 @@ def test_build_match_report_llm_ok(monkeypatch):
     assert report["llmStatus"] == "ok"
     assert report["oneLineSummary"] == "总体匹配良好。"
     assert report["learningPath"][0]["steps"][0]["skill"] == "Python"
-    # LLM 未给 resource/milestone → 留空，不用模板补
+    # 未给 resource/milestone 就留空
     assert report["learningPath"][0]["steps"][0]["resource"] == ""
     assert report["learningPath"][0]["steps"][0]["milestone"] == ""
 

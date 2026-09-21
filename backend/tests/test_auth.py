@@ -27,8 +27,6 @@ def test_decode_invalid_token():
     assert decode_token("not-a-valid-token") is None
 
 
-# ===== 管理员用户名保留（防抢注后被 ensure_admin 提权）=====
-
 def test_reserved_username_rejected_by_create_user(tmp_db):
     """create_user 是最后一道闸：即使绕过 HTTP 层也建不出管理员同名账号。"""
     assert db.create_user(config.ADMIN_USERNAME, "123456") is None
