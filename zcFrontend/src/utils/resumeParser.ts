@@ -1,10 +1,6 @@
 /**
- * 简历技能要素解析引擎（纯前端）
- *
- * 策略：
- * 1. 基于人工维护的别名表（英文术语 / 缩写 + 中文技能名）构建技能字典，提高召回。
- * 2. 对简历文本做大小写不敏感 + 词边界匹配，统计每个技能的命中次数 → 置信度。
- * 3. 支持真实解析 .pdf(pdfjs-dist) / .docx(mammoth) / .txt(FileReader)，均懒加载。
+ * 简历技能解析（纯前端）：别名字典 + 词边界匹配 + 结构化提取。
+ * PDF/DOCX/TXT 文件解析均懒加载。
  */
 
 export interface ParsedSkill {
@@ -13,13 +9,7 @@ export interface ParsedSkill {
   hits: number
   /** 达标(有项目/经验上下文证据) / listed(仅技能清单罗列) */
   evidence: 'mastered' | 'listed'
-  /**
-   * 实际在简历里命中的匹配词 = 字典名本身 + 命中的别名（去重）。
-   *
-   * 后端拿它（而不是 name）去比岗位技能点。只传字典名会**丢掉证据**：
-   * 简历写「BLDC」→ 字典名是「电机控制」→ 后端拿「电机控制」去比岗位技能点
-   * 「BLDC」，一个 ASCII token 都对不上，永远判未掌握。
-   */
+  /** 实际命中的匹配词（字典名 + 命中别名去重），后端拿它与岗位技能点比对 */
   terms: string[]
 }
 
@@ -42,16 +32,12 @@ export interface ResumeParseResult {
 interface DictEntry {
   name: string
   aliases: string[]
-  /** 是否对字典名本身做匹配；false 表示仅匹配别名（用于容易误报的词，如 Go/C） */
+  /** false 时仅匹配别名（Go/C 等易误报词） */
   matchCanonical: boolean
 }
 
-// ===== 人工别名表：字典名 -> 别名（别名同样参与匹配） =====
-//
-// 【收录标准】只收「本身就在陈述该能力 / 该专有名词」的词，不收「碰巧相关」的泛词。
-//   可以收：'跨部门协作': ['团队协作', '统筹协调']  —— 这些词本身就是在讲协作能力
-//   不要收：'跨部门协作': ['团队', '沟通', '配合']  —— 泛词满篇都是，等于放水
-// 判断方法：问「简历里出现这个词，评委会不会认同候选人具备该技能？」不会就别收。
+// 人工别名表：字典名 → 别名
+// 只收本身陈述该能力的词，不收碰巧相关的泛词
 const ALIASES: Record<string, string[]> = {
   'Python': ['python3', 'py'],
   '机器学习': ['machine learning', 'ml', '机器学习算法'],
@@ -81,20 +67,16 @@ const ALIASES: Record<string, string[]> = {
   '数据分析': ['数据分析', 'data analysis'],
   '数据仓库': ['数仓', 'data warehouse'],
   '测试': ['自动化测试', '功能测试'],
-  // 性能测试 / 性能优化 分开：它们是两件事，而且岗位技能点里两个都出现，
-  // 合成一条会让写了「性能优化」的简历同时把「性能测试」判成已掌握
+  // 性能测试与性能优化分开，避免互判
   '性能测试': ['压测', '压力测试'],
   '性能优化': ['性能优化', '性能调优', '性能提升'],
-  // 不收「安全测试」：防御性安全测试 ≠ 渗透测试（攻击性）。两者在岗位技能点里并存，
-  // 收了会把「负责系统安全测试」这种话判成掌握渗透测试
+  // 安全测试≠渗透测试，不收
   '渗透测试': ['pentest', '漏洞挖掘'],
   '网络协议': ['tcp/ip', 'http协议'],
   '架构设计': ['系统架构', '技术架构', '安全架构', '架构设计能力'],
   '人工智能': ['ai', 'artificial intelligence', 'ai应用', 'ai技术', 'ai辅助开发'],
 
-  // ---- AI / 算法：岗位技能矩阵里的具体框架、算法与工具名 ----
   'Agent': ['智能体', '多智能体', 'multi-agent', 'ai agent', 'agent开发', '智能体开发'],
-  // LlamaIndex 是独立框架（与 LangChain 是竞品），写它不等于会 LangChain
   'LangChain': ['langchain'],
   'LlamaIndex': ['llamaindex', 'llama index'],
   'LangGraph': ['langgraph'],
@@ -117,7 +99,6 @@ const ALIASES: Record<string, string[]> = {
   '差分隐私': ['differential privacy'],
   '组合优化': ['组合优化', 'qaoa', 'qubo', '模拟退火', '遗传算法'],
 
-  // ---- 数据 / 数据标注（AI 产品与数据岗位的高频技能点）----
   '数据标注': ['标注流程', '标注质检', '标注工作流', '标注规范', '数据标注流程'],
   '标注质量评估': ['iaa', 'inter-annotator agreement', '标注一致性', '置信度建模', '标注质量'],
   '标注工具': ['label studio', 'cvat', 'labelimg', 'doccano'],
@@ -126,7 +107,6 @@ const ALIASES: Record<string, string[]> = {
   '数据湖': ['iceberg', 'hudi', 'delta lake'],
   'ETL': ['etl', 'elt', '数据抽取'],
 
-  // ---- 后端 / 前端 / 云 ----
   'FastAPI': ['fastapi'],
   'Node.js': ['nodejs', 'node.js', 'node'],
   'SQLite': ['sqlite'],
@@ -141,7 +121,6 @@ const ALIASES: Record<string, string[]> = {
   '云平台': ['aws', '阿里云', '腾讯云', 'azure', '华为云', '云平台'],
   '云安全': ['云安全', '云原生安全'],
 
-  // ---- 硬件 / 嵌入式 / 电气（嵌入式与物联网岗位技能点）----
   '电路设计': ['电路设计', '原理图', 'pcb', '硬件电路', '电路板'],
   '模拟电路': ['模拟电路', '数模混合'],
   '数字电路': ['数字电路', 'verilog', 'fpga'],
@@ -163,7 +142,6 @@ const ALIASES: Record<string, string[]> = {
   'IoT': ['物联网', 'iot', 'mqtt'],
   '多传感器融合': ['多传感器融合', 'sensor fusion', '3d感知', '点云'],
 
-  // ---- 产品 / 项目：产品岗位的核心技能点（规划、需求、协作、文档）----
   '产品规划': ['产品规划', '产品定位', '产品路线图', 'roadmap', '产品方向'],
   '需求分析': ['需求分析', '需求拆解', '需求梳理', '功能规划', '需求评审', '业务流程设计'],
   '需求优先级': ['需求优先级', '优先级管理', '需求排期', '优先级'],
@@ -180,7 +158,6 @@ const ALIASES: Record<string, string[]> = {
   '文档编写': ['文档编写', '技术文档', '文档撰写', '方案编写'],
   '工作流编排': ['工作流', 'dify', 'coze', 'n8n', '流程编排', '低代码'],
 
-  // ---- 数据工程 / 运维 / 工程实践：采集、可视化、监控、部署、版本控制等 ----
   '数据采集': ['数据采集', '爬虫', '爬取', '网络爬虫', '数据抓取', 'scrapy', '采集数据', '数据爬取'],
   '数据可视化': ['数据可视化', '可视化', '图表', '报表', 'echarts', 'tableau'],
   '监控告警': ['prometheus', 'grafana', 'elk', '日志分析', '监控告警', '可观测性'],
@@ -192,37 +169,24 @@ const ALIASES: Record<string, string[]> = {
   'Git': ['版本控制', 'gitlab', 'github', 'git版本控制'],
 }
 
-// ===== 岗位技能词表（纯技能名）=====
-// 「前端纯后端」后不再内置岗位技能数据；这里显式列出后端 jobSkillProgression 中
-// 高频出现的具体技术名词，避免简历里写了 PyTorch / Spring / Spark / Flink 等却识别不出，
-// 导致 userSkills 为空、人岗匹配得分恒为 0。
+// 后端技能矩阵中的高频技术名词，避免漏识别
 const SKILL_NAMES: string[] = [
-  // AI / 算法
   'PyTorch', 'TensorFlow', 'Keras', 'NumPy', 'Pandas', 'Scikit-learn', 'Matplotlib', 'Seaborn',
   'OpenCV', 'CUDA', 'ONNX', 'LangChain', 'LlamaIndex', 'GPT', 'LoRA', 'RLHF', 'GAN', 'Agent',
   '自然语言处理', '强化学习', '神经网络', '卷积神经网络', '循环神经网络', '多模态', '扩散模型',
   '微调', '知识蒸馏', '模型量化',
-  // 后端
   'Java', 'Spring', 'Spring Boot', 'Spring Cloud', 'MyBatis', 'JVM', 'Golang', 'Node.js',
   '分布式', '高并发', '高可用', 'RESTful', 'gRPC', 'Dubbo', 'RabbitMQ', 'PostgreSQL', 'MongoDB', 'Elasticsearch',
-  // 数据
   'Spark', 'Flink', 'Hadoop', 'Hive', 'ETL', '数据挖掘', '数据可视化', 'ClickHouse', 'OLAP', 'Tableau',
-  // 前端
   'Webpack', 'Vite', 'Flutter', '小程序', '鸿蒙', 'HTML', 'CSS', 'ECharts',
-  // 云 / 运维
   'DevOps', 'Jenkins', 'CI/CD', 'Prometheus', 'Grafana', 'Terraform', 'Ansible', 'Istio',
   '云原生', 'Linux', 'Nginx', 'Shell',
-  // 安全
   '网络安全', '漏洞挖掘', 'XSS', 'SQL注入', 'Burp Suite', 'WAF', '零信任', '加密',
-  // 嵌入式
   'RTOS', 'ARM', '单片机', '嵌入式', '物联网', 'MCU', 'MQTT', 'PCB',
-  // 测试
   '功能测试', '自动化测试', 'Selenium', 'JMeter', 'Postman', '回归测试', '测试用例',
-  // 产品 / 基础
   '需求分析', '项目管理', '用户研究', 'PRD', '敏捷开发', 'Git', '数据结构', '操作系统', '算法',
 ]
 
-// ===== 技能字典（模块级懒构建：人工别名表 + 岗位技能词表） =====
 let _dict: DictEntry[] | null = null
 function buildDict(): DictEntry[] {
   const map = new Map<string, DictEntry>()
@@ -232,13 +196,11 @@ function buildDict(): DictEntry[] {
     if (!map.has(n)) map.set(n, { name: n, aliases: [], matchCanonical: true })
     if (alias) map.get(n)!.aliases.push(alias)
   }
-  // 人工别名：别名表键即字典项（canonical），别名同样参与匹配
   for (const [name, aliases] of Object.entries(ALIASES)) {
     for (const a of aliases) add(name, a)
   }
-  // 岗位技能词表：补齐后端技能矩阵中的具体技术名词（去重由 add 内部 map 保证）
   for (const name of SKILL_NAMES) add(name)
-  // 特例：单字母 / 易误报词，仅匹配别名
+  // 易误报词仅匹配别名
   for (const risky of ['C', 'Go']) {
     const e = map.get(risky)
     if (e) e.matchCanonical = false
@@ -250,21 +212,18 @@ function getDict(): DictEntry[] {
   return _dict
 }
 
-// ===== 匹配工具 =====
 function escapeReg(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 function skillRegex(term: string): RegExp {
   const esc = escapeReg(term)
   const hasCJK = /[\u4e00-\u9fff]/.test(term)
-  // 纯 ASCII 词加后缀边界，避免子串误报（如 create 里的 c）。
-  // 注意：不用负向后行断言 (?<!...)，Safari <16.4 不支持、会在 new RegExp 时直接抛
-  // SyntaxError；前缀边界改由 countUniqueHits 手工判断，效果等价。
+  // 纯 ASCII 词加后缀边界，避免子串误报
+  // 不用后行断言（Safari<16.4 不支持），前缀边界改由 countUniqueHits 判断
   if (!hasCJK) return new RegExp(`${esc}(?![a-z0-9])`, 'gi')
   return new RegExp(esc, 'gi')
 }
-/** 统计多个等价术语（canonical + 别名）在文本中的「去重命中数」：按起始位置去重，
- *  避免「别名与字典名大小写变体 / 别名包含字典名」把同一处提及重复计数。 */
+/** 按起始位置去重统计命中数 */
 function countUniqueHits(terms: string[], lower: string): { hits: number; matched: string[] } {
   const positions = new Set<number>()
   const matched = new Set<string>()
@@ -273,35 +232,26 @@ function countUniqueHits(terms: string[], lower: string): { hits: number; matche
     const ascii = !/[\u4e00-\u9fff]/.test(term)
     let m: RegExpExecArray | null
     while ((m = re.exec(lower)) !== null) {
-      // 纯 ASCII 词补前缀边界：前一字符不得为 [a-z0-9]（等价于原负向后行断言，兼容旧 Safari）
+      // 补前缀边界，等价于负向后行断言
       if (ascii && m.index > 0 && /[a-z0-9]/.test(lower[m.index - 1])) {
         if (m[0].length === 0) re.lastIndex++
         continue
       }
       positions.add(m.index)
       matched.add(term)
-      if (m[0].length === 0) re.lastIndex++ // 防零宽死循环（正常不会触发，仅保险）
+      if (m[0].length === 0) re.lastIndex++ // 防零宽死循环
     }
   }
   return { hits: positions.size, matched: [...matched] }
 }
 
-/** 泛用 ASCII 缩写：本身不构成技能身份，不作为独立词面传出。
- *  与后端 matching._GENERIC_ASCII 同一份口径——否则简历里一句「AI」会把
- *  岗位技能点「Scale AI平台配置」判成已掌握。 */
+/** 泛用 ASCII 缩写，不构成技能身份 */
 const GENERIC_ASCII = new Set([
   'ai', 'ml', 'dl', 'llm', 'api', 'sdk', 'ui', 'ux', 'os', 'db',
   'it', 'id', 'web', 'app', 'dev', 'ops', 'demo', 'proj', 'sys', 'code',
 ])
 
-/** 命中的别名里，哪些值得作为独立词面交给后端。
- *
- * 筛掉两类辨识度不足的别名：
- *   1. 2 字符以内的纯 ASCII（ai / ml / js / ts / py / h5）；
- *   2. ASCII 部分全是泛用缩写的中英混排（'ai应用' → 只剩 token 'ai'）。
- * 中文别名不筛：后端的中文匹配要求「包含关系 + 被包含方够格」，
- * 短中文别名（微调 / 蒸馏 / 压测）不会无差别命中长技能点。
- */
+/** 别名筛选：太短的 ASCII 和泛用缩写别名不作为独立词面 */
 function emitTerms(name: string, matched: string[]): string[] {
   const out = [name]
   for (const t of matched) {
@@ -347,10 +297,8 @@ function confidenceFor(hits: number): number {
   return 0.72
 }
 
-// ===== 结构化信息提取 =====
 function extractYears(text: string): number | undefined {
-  // 「年」与「经验」之间允许出现技能/方向词（如「3年Python开发经验」「3年以上相关经验」），
-  // 但限定不超过 15 个非分隔字符，避免跨句误匹配。
+  // 「年」与「经验」之间最多 15 个字符，避免跨句误匹配
   const re = /(\d{1,2})\s*年[^。；，,\n]{0,15}?经验/g
   let max: number | undefined
   let m: RegExpExecArray | null
@@ -368,9 +316,7 @@ function extractEducation(text: string): string | undefined {
   return undefined
 }
 
-// ===== 简历事实提取（项目 / 证书 / 获奖 / 技能证据）=====
-
-/** 动作/结果动词：命中说明该技能出现在「做了某事」的上下文，而非技能清单罗列 */
+/** 动作动词：出现在做事上下文的技能才记为达标 */
 const ACTION_VERBS = /负责|开发|实现|搭建|设计|优化|使用|主导|参与|基于|完成|构建|部署|上线|应用|利用|维护|重构|编写|撰写|落地|交付|支撑|驱动|改造|升级|解决|调优|自研|集成|研发|迭代|承担|采用|借助|通过/
 
 /** 证书：正则 -> 规范化标签 */
@@ -424,30 +370,19 @@ const PROJECT_SIGNALS: [RegExp, string][] = [
   [/日活|DAU|MAU|GMV|转化率|用户量/, '业务指标'],
 ]
 
-/** 项目实体名词：用于识别「这是一条项目描述」 */
+/** 项目名词，用于识别项目描述句 */
 const PROJECT_NOUNS = /系统|平台|项目|App|小程序|网站|引擎|模块|工具|中台|服务|数据库|商城|门户|后台|框架/
 
-// ===== 模糊表达识别（能力短语）=====
 /**
- * 简历里很多能力是**叙述出来**的，不写技能名本身：
- * 「统筹实验室日常管理与技术培训」「围绕实际使用场景梳理业务流程」「从真实场景反推功能主线」。
- * 这类句子旧词典一个词都命中不了，能力就丢了。这里用「动作 + 对象」的短语模式把它们映射回标准技能名。
- *
- * 【收录标准】同 ALIASES——**模式本身必须已经断言了该能力**，缺一不可。
- *   可以收：/(统筹|牵头|带领|组织).{0,10}(团队|小组|成员)/  → 跨部门协作（这句话就是在讲协作）
- *   不要收：/团队|沟通|参与/                              → 泛词满篇都是，等于放水
- * 判断方法：把命中的那句话单独念出来，评委会不会认同候选人具备该技能？不会就别收。
- *
- * 注意：正则**不能加 g 标志**（带 g 的 test() 会记忆 lastIndex，同一模式第二次调用结果就错了）。
+ * 叙述型能力短语 → 标准技能名的映射。
+ * 收录标准同别名表：模式本身必须已断言该能力。正则不能加 g 标志（test 会记忆 lastIndex）。
  */
 const CAPABILITY_PATTERNS: [RegExp, string][] = [
-  // —— 协作 / 统筹 / 项目推进 ——
   [/跨(部门|团队|职能)/, '跨部门协作'],
   [/(统筹|牵头|带领|组织|协调).{0,10}(团队|小组|成员|部门|各方|资源)/, '跨部门协作'],
   [/(团队|小组)(协作|合作|配合|沟通)/, '跨部门协作'],
   [/(任务分工|资源协调|进度(管理|跟进|把控|推进)|项目(管理|推进|统筹|落地|交付|排期))/, '项目管理'],
   [/(统筹|牵头|主导|策划|组织).{0,12}(项目|竞赛|活动|培训|会议)/, '项目管理'],
-  // —— 需求 / 产品 ——
   [/(梳理|拆解|分析|调研|挖掘|澄清|反推|明确).{0,8}需求/, '需求分析'],
   [/需求(梳理|拆解|分析|调研|评审|管理|文档|优先级)/, '需求分析'],
   [/(功能|产品|业务)(规划|主线|范围|清单|链路|流程|取舍)/, '需求分析'],
@@ -458,28 +393,24 @@ const CAPABILITY_PATTERNS: [RegExp, string][] = [
   [/(原型|交互稿|线框)/, '原型设计'],
   [/(技术|方案)(选型|可行性|论证|评估)/, '技术可行性评估'],
   [/(可行性|技术方案)(分析|评估|论证)/, '技术可行性评估'],
-  // —— 文档 / 数据 ——
   [/(撰写|编写|输出|整理|产出|沉淀).{0,8}(文档|说明书|方案|报告|规范|手册|清单|白皮书)/, '文档编写'],
   [/(数据|指标).{0,4}(分析|洞察|复盘|统计|监控|看板)/, '数据分析'],
   [/(数据|信息)(采集|抓取|爬取|获取)/, '数据采集'],
   [/(爬取|爬虫|抓取).{0,8}(数据|岗位|网页|信息|内容)/, '数据采集'],
-  // —— 工程 ——
   [/(模型|算法|推理).{0,6}(部署|上线|投产)/, '模型部署'],
   [/(容器化|docker|k8s|kubernetes).{0,6}(部署|编排|管理|迁移)/i, 'Docker'],
   [/(工作流|流程|流水线)(编排|设计|搭建|自动化)/, '工作流编排'],
   [/(自动化|批量).{0,4}(流水线|流程|脚本|创作|生产|生成)/, '工作流编排'],
   [/(单元测试|集成测试|回归测试|测试用例|自动化测试|接口测试)/, '测试'],
-  // 测试与优化是两件不同的事（岗位技能点里两者都出现），不能都归到「性能测试」：
-  // 旧实现把「通过缓存与索引优化将接口耗时降低了40%」这种优化叙述也判成性能测试
+  // 性能优化≠性能测试，分开匹配
   [/(性能|压力|负载)(测试|压测)/, '性能测试'],
   [/(性能|负载|吞吐|耗时).{0,4}(优化|提升|调优|降低)/, '性能优化'],
   [/(日志|监控|告警).{0,4}(分析|体系|平台|接入|搭建)/, '监控告警'],
-  // —— AI 数据标注 ——
   [/(标注|打标)(流程|规范|工作流|质检|质量|一致性|体系)/, '数据标注'],
   [/(标注|数据)(质量|一致性|准确率).{0,4}(评估|校验|审核|监控)/, '标注质量评估'],
 ]
 
-/** 竞赛类奖项标签（用于把「获奖」映射成岗位技能点「计算机竞赛获奖」） */
+/** 竞赛类奖项，映射为技能点「计算机竞赛获奖」 */
 const COMPETITION_AWARDS = new Set([
   'ACM/ICPC', '数学建模竞赛', '蓝桥杯', '电子设计大赛', '挑战杯',
   '创新创业大赛', '大创项目', '机器人大赛', '计算机设计大赛', '算法/程序竞赛',
@@ -489,7 +420,7 @@ function splitSegments(text: string): string[] {
   return text.split(/[\n。；;!！?？]+/).map(s => s.trim()).filter(s => s.length >= 4)
 }
 
-/** 技能证据分级：出现在含动作动词的句子里 → 达标；仅罗列 → listed */
+/** 技能出现在动作动词句子里 → 达标；仅罗列 → listed */
 function evidenceFor(terms: string[], text: string): 'mastered' | 'listed' {
   const lower = text.toLowerCase()
   const lterms = terms.map(t => t.toLowerCase())
@@ -519,14 +450,13 @@ function extractProjects(text: string): ProjectInfo[] {
     const name = nameMatch ? nameMatch[1] + nameMatch[2] : '项目'
     if (seen.has(name)) continue
     const signals = PROJECT_SIGNALS.filter(([re]) => re.test(seg)).map(([, label]) => label)
-    if (signals.length === 0 && projects.length >= 3) continue // 无含金量信号的项目仅在数量少时保留
+    if (signals.length === 0 && projects.length >= 3) continue // 无信号的项目仅在数量少时保留
     seen.add(name)
     projects.push({ name, signals })
   }
   return projects
 }
 
-// ===== 文本解析主入口 =====
 export function parseResumeText(text: string): ResumeParseResult {
   const lower = text.toLowerCase()
   const dict = getDict()
@@ -547,8 +477,6 @@ export function parseResumeText(text: string): ResumeParseResult {
       skills.push(s)
     }
   }
-  // 模糊表达：叙述型语句里体现的能力（见 CAPABILITY_PATTERNS 收录标准）。
-  // 命中的模式本身就是动作句，证据一律记 mastered。
   for (const [re, label] of CAPABILITY_PATTERNS) {
     if (!re.test(text)) continue
     const cur = byName.get(label)
@@ -561,8 +489,7 @@ export function parseResumeText(text: string): ResumeParseResult {
     skills.push(s)
   }
   const awards = collectPatterns(text, AWARD_PATTERNS)
-  // 竞赛获奖 → 技能词：招聘方把「计算机竞赛获奖」当技能点来要求，简历里的竞赛奖项就是它的文本证据。
-  // 只认竞赛，不把奖学金 / 荣誉称号算成技能。
+  // 竞赛奖项映射为技能点，奖学金/荣誉称号不算
   if (awards.some(a => COMPETITION_AWARDS.has(a)) && !byName.has('计算机竞赛获奖')) {
     const s: ParsedSkill = { name: '计算机竞赛获奖', confidence: 0.72, hits: 1, evidence: 'mastered', terms: ['计算机竞赛获奖'] }
     byName.set(s.name, s)
@@ -580,18 +507,13 @@ export function parseResumeText(text: string): ResumeParseResult {
   }
 }
 
-// ===== 文件解析 =====
-/** 解析 PDF 文本（懒加载 pdfjs-dist，worker 用 vite ?worker 创建，避免 CDN 依赖） */
+/** 解析 PDF 文本（懒加载 pdfjs-dist，worker 用 vite ?worker 创建） */
 export async function extractPdfText(buf: ArrayBuffer): Promise<{ text: string; hasImages: boolean }> {
-  // 必须用 pdfjs-dist 的 legacy 构建（自带 core-js polyfill，会自行补齐 Iterator 等现代全局）：
-  // 新版 default 构建 pdf.mjs 在模块顶层直接写 `typeof Iterator.prototype.join`，
-  // 会求值 ES2024 `Iterator` 全局，在没有 Iterator Helpers 的浏览器
-  // （Chromium<122 / Safari<18 / Firefox<131，含不少安卓机浏览器如 OPPO 等）里抛出
-  // `ReferenceError: Iterator is not defined`，导致上传 PDF 简历无法解析/保存。
+  // 必须用 legacy 构建：新版 default 构建在旧浏览器会抛 Iterator is not defined
   const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs')
   const workerMod: any = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker')
   pdfjs.GlobalWorkerOptions.workerPort = new workerMod.default()
-  // pdfjs v6 的 PDFDocumentProxy 没有 .destroy()：销毁必须走 loadingTask（getDocument 返回值）
+  // pdfjs v6 的销毁必须走 loadingTask
   const loadingTask = pdfjs.getDocument({ data: buf, isEvalSupported: false })
   const doc = await loadingTask.promise
   let text = ''
@@ -602,12 +524,12 @@ export async function extractPdfText(buf: ArrayBuffer): Promise<{ text: string; 
       const tc = await page.getTextContent()
       text += tc.items.map((it: any) => ('str' in it ? it.str : '')).join(' ') + '\n'
       if (!hasImages) {
-        // 检测页内是否含图片（扫描版/图片转 PDF 无文字层），用于给出更精准的错误提示
+        // 检测扫描版 PDF（无文字层）
         try {
           const opList = await page.getOperatorList()
           hasImages = opList.fnArray.includes(pdfjs.OPS.paintImageXObject)
         } catch {
-          // 忽略单页算子解析失败，不影响文本提取
+          // 忽略单页失败
         }
       }
       page.cleanup()

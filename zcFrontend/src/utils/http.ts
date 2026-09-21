@@ -1,8 +1,4 @@
-// ============================================================
 // HTTP 客户端封装：统一 baseURL、token 注入、错误处理
-// 后端基路径 /api/v1（接口清单见 backend/app/server.py 的路由定义，启动后可在 /docs 查看）
-// ============================================================
-
 const BASE_URL: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) || 'http://localhost:8000/api/v1'
 
@@ -24,13 +20,12 @@ export async function http<T>(path: string, options: RequestInit = {}): Promise<
     } catch {
       /* 非 JSON 响应，忽略 */
     }
-    // FastAPI 422 的 detail 是数组（逐字段校验错误），非字符串一律回退到状态码，
-    // 否则 new Error(detail) 会把它字符串化成 [object Object] 弹给用户
+    // FastAPI 422 的 detail 是数组，非字符串回退到状态码
     const e = new Error(typeof detail === 'string' && detail ? detail : `HTTP ${res.status}`)
     ;(e as any).status = res.status
     throw e
   }
-  // 处理 204 / 空响应体：res.json() 会抛 "Unexpected end of JSON input"
+  // 处理 204 / 空响应体
   const text = await res.text()
   return (text ? JSON.parse(text) : undefined) as T
 }
