@@ -15,10 +15,8 @@ from . import config
 SNAPSHOT_PREFIX = "knowledge-"
 SNAPSHOT_SUFFIX = ".json"
 
-# 内置种子快照：随仓库分发，离线（无爬虫/无 LLM key）也能秒级加载完整数据
+# 内置种子快照：随仓库分发，离线也能秒级加载
 SEED_SNAPSHOT = config.BACKEND_ROOT / "seed" / "knowledge-seed.json"
-
-# ===== JSON 快照管理 =====
 
 
 def _snapshot_path(ts: str) -> Path:
@@ -50,39 +48,27 @@ def list_snapshots() -> list[Path]:
 
 
 def load_latest_snapshot() -> dict[str, Any] | None:
-    """读最新快照，**每次返回一份全新解析的对象**。
-
-    写方（ingest / enrich）用这个：它们会就地改这份 dict 再 save_snapshot()，
-    必须拿到私有副本，否则改到一半会被别的请求读到。
-    只读的请求路径请用 load_cached_snapshot()。
-    """
+    """读最新快照，每次返回一份全新解析的对象。写方用，只读路径用 load_cached_snapshot。"""
     snaps = list_snapshots()
     if not snaps:
         return None
     return json.loads(snaps[-1].read_text(encoding="utf-8"))
 
 
-# 只读快照缓存：450KB 的快照每次 glob + 读盘 + json.loads 约 4.5ms，
-# 而 analyze / 列表类接口每次请求都要读一遍。按 (路径, mtime) 缓存，
-# ingest/enrich 写出新快照后 mtime 变化 → 自动失效，无需重启。
+# 只读快照缓存：按 (路径, mtime) 缓存，新快照写入后自动失效
 _snapshot_cache: dict[str, Any] = {"path": None, "mtime": 0.0, "data": None}
 _snapshot_lock = threading.Lock()
 
 
 def load_cached_snapshot() -> dict[str, Any]:
-    """读最新快照（进程内缓存，跨请求复用同一份对象）。
-
-    ⚠️ 返回的是**共享对象**，调用方一律只读。要改快照请用 load_latest_snapshot()
-    拿副本，改完 save_snapshot()。目前唯一的写方是 ingest / enrich。
-    """
+    """读最新快照（进程内缓存，跨请求复用同一份对象）。返回共享对象，调用方只读。"""
     snaps = list_snapshots()
     if not snaps:
         return {}
     latest = snaps[-1]
     path = str(latest)
     with _snapshot_lock:
-        # stat 必须在锁内做：管理端刷新失败回滚（_rollback_partial_snapshots）会
-        # 删除最新的快照文件，stat 在锁外可能刚好撞上文件被删 → FileNotFoundError → 500
+        # stat 必须在锁内做：失败回滚会删最新快照文件，锁外可能撞上文件被删
         mtime = latest.stat().st_mtime
         if _snapshot_cache["path"] == path and _snapshot_cache["mtime"] == mtime:
             return _snapshot_cache["data"]
@@ -101,11 +87,7 @@ def ensure_seed_snapshot() -> None:
     shutil.copyfile(SEED_SNAPSHOT, _snapshot_path(ts))
 
 
-# ===== ChromaDB =====
-
-# ChromaDB 底层为 SQLite，并发读写会触发 "database is locked"。此锁覆盖所有对集合的
-# 读（rag.search）、写（upsert_fragments）与重建（reset_collection），确保 admin 刷新
-# 与用户检索并发时互斥。embedding（HTTP 调用）在锁外执行，保持并发。
+# ChromaDB 底层为 SQLite，并发读写会触发锁冲突；此锁覆盖集合的读/写/重建
 col_lock = threading.Lock()
 
 _chroma_client: chromadb.ClientAPI | None = None

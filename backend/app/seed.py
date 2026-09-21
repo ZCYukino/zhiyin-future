@@ -1,12 +1,9 @@
-"""内置种子数据：爬虫失败或未配置 API Key 时的降级样本。
-
-仅含“原始 JD 文本”，结构化抽取仍走 LLM（或规则降级），保证系统可运行、可演示。
-"""
+"""内置种子数据：爬虫失败或未配置 API Key 时的降级样本。"""
 from __future__ import annotations
 
 from .crawler.base import RawJob
 
-# 新一代信息技术领域代表性岗位 JD（用于离线采集降级 + RAG 向量库演示）
+# 新一代信息技术领域代表性岗位 JD
 SEED_RAW_JOBS: list[RawJob] = [
     RawJob(
         title="大模型算法工程师",

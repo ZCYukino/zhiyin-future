@@ -15,16 +15,13 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
 ]
 
-# 请求间隔（秒），低频率、遵守 robots，避免对目标站点造成压力
+# 请求间隔（秒），低频率避免对目标站点造成压力
 REQUEST_INTERVAL = (0.8, 2.0)
 
 
 @dataclass
 class RawJob:
-    """爬虫产出的原始 JD（未结构化，交给 LLM 抽取）。
-
-    只保留岗位信息，不采集任何个人联系方式（合规）。
-    """
+    """爬虫产出的原始 JD（未结构化，交给 LLM 抽取）。只保留岗位信息。"""
 
     title: str
     description: str
@@ -78,10 +75,7 @@ def post_json(
     timeout: int = 15,
     retries: int = 2,
 ) -> Any:
-    """带重试、随机延迟、UA 轮换的 POST JSON 请求，返回解析后的 JSON。
-
-    与 fetch 同一套低频率合规约定（0.8~2s 随机延迟），供 JSON API 型站点使用。
-    """
+    """带重试、随机延迟、UA 轮换的 POST JSON 请求，返回解析后的 JSON。"""
     hdrs = {"User-Agent": random.choice(USER_AGENTS)}
     if headers:
         hdrs.update(headers)

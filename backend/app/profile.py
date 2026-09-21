@@ -1,8 +1,4 @@
-"""个人能力画像：后端 LLM 生成（真实 AI，无规则降级）。
-
-对齐前端 AbilityProfile 结构：简历事实驱动，聚焦「技能达标度 / 学历 / 经验 /
-项目含金量 / 证书获奖」，每一项都基于简历内部证据，可溯源、可落地。
-"""
+"""个人能力画像：后端 LLM 生成，对齐前端 AbilityProfile 结构，每一项都基于简历内部证据。"""
 from __future__ import annotations
 
 import json
@@ -13,7 +9,7 @@ from . import settings
 from .llm import LLMNotConfigured, generate_json
 from .prompts import ABILITY_PROFILE_PROMPT
 
-# 画像 LLM 单次超时（秒）：失败返回 None（由路由转 502），保证响应有硬上限。
+# 画像 LLM 单次超时（秒），失败返回 None
 PROFILE_LLM_TIMEOUT = 45.0
 
 
@@ -56,11 +52,7 @@ def _parse_evidence(text: str) -> dict[str, str]:
 
 
 def _validate(data: dict[str, Any]) -> dict[str, Any] | None:
-    """只校验 LLM 输出的结构/类型/范围，不回填任何规则值。
-
-    任一必需字段缺失或非法 → 返回 None（整份画像作废），宁可明确失败也不拼装。
-    列表字段必须是 list（可为空——"无证书/无获奖"是合法输出），元素过滤非字符串。
-    """
+    """只校验 LLM 输出的结构/类型/范围，不回填任何规则值；字段缺失或非法返回 None。"""
 
     def strl(v: Any) -> list[str] | None:
         if not isinstance(v, list):
@@ -150,11 +142,7 @@ def build_ability_profile(
     user: dict[str, Any],
     credentials: settings.Credentials | None = None,
 ) -> dict[str, Any] | None:
-    """生成个人能力画像（真实 LLM，无规则降级）。
-
-    未配置 Key → raise LLMNotConfigured（由路由转 400 引导配置）；
-    LLM 失败或输出校验不过 → None（由路由转 502）。
-    """
+    """生成个人能力画像；未配置 Key 抛 LLMNotConfigured，失败或校验不过返回 None。"""
     cred = credentials or settings.llm_credentials(user)
     if not cred.configured:
         raise LLMNotConfigured("请先配置 DeepSeek API Key")

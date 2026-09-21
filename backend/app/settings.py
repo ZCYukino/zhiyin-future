@@ -1,7 +1,6 @@
-"""账号级 API Key 凭据解析：Key 存 SQLite（user_api_keys 表），无 .env 回退、无跨账号回退。
+"""账号级 API Key 凭据解析：Key 存 SQLite，无 .env 回退、无跨账号回退。
 
-零相交约定：普通用户的 Key 只服务自己的请求；管理员的 Key 只服务管理员自己的请求
-与数据刷新等系统级任务。凭据解析必须基于鉴权 token 的用户，绝不基于可伪造的请求体字段。
+凭据解析基于鉴权 token 的用户，绝不基于可伪造的请求体字段。
 """
 from __future__ import annotations
 
@@ -13,8 +12,7 @@ from . import config, db
 
 @dataclass(frozen=True)
 class Credentials:
-    # repr=False：明文 Key 绝不进 repr / 日志 / 异常本地变量 / 断言 diff。
-    # compare=False：相等性只看地址与模型名，避免把 Key 拖进比较逻辑（那里最容易外泄）。
+    # repr/compare=False：明文 Key 不进 repr/日志/比较逻辑
     api_key: str = field(repr=False, compare=False)
     base_url: str
     model: str

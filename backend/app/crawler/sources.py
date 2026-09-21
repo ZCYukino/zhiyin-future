@@ -1,20 +1,7 @@
 """招聘站点爬虫实现。
 
-数据源一：中国公共招聘网（job.mohrss.gov.cn，人力资源和社会保障部公共服务站点）。
-选择理由：
-- 政府公共服务平台，公开数据、无登录/验证码，合规风险低；
-- 列表页内嵌结构化岗位 JSON（findjoblist 隐藏域），解析稳定；
-- 提供按关键词检索，可聚焦“新一代信息技术”岗位（贴合赛题「岗位与能力图谱」）。
-
-数据源二：国聘（www.iguopin.com，国投人力旗下央企国企招聘平台）。
-选择理由：
-- 央企国企实名岗位，JD 正文完整规范（职责+任职要求），与 mohrss 互补；
-- 站点 robots.txt 完全开放；底层 JSON API 免登录、无验证码（gp-api.iguopin.com）；
-- 一次接口响应即含 岗位名/公司/城市/学历/经验/薪资/完整 JD 正文，无需抓详情页。
-
-合规约定：
-- 低频率请求（base.fetch/post_json 内置 0.8~2s 随机延迟 + 重试）；
-- 仅采集岗位信息（名称/城市/薪资/JD 正文），不采集任何个人联系方式。
+数据源：中国公共招聘网（job.mohrss.gov.cn，政府站点）与国聘（www.iguopin.com）。
+低频率请求（0.8~2s 随机延迟 + 重试）；仅采集岗位信息，不采集个人联系方式。
 """
 from __future__ import annotations
 
@@ -39,7 +26,7 @@ class MohrssCrawler:
     BASE = "http://job.mohrss.gov.cn/cjobs/jobinfolist/listJobinfolist"
     DETAIL_BASE = "http://job.mohrss.gov.cn/cjobs/htmls/cb21gwPages"
 
-    # 新一代信息技术方向关键词（贴合赛题「岗位与能力图谱」主题）
+    # 新一代信息技术方向关键词
     KEYWORDS = [
         "算法工程师",
         "人工智能",
@@ -59,7 +46,7 @@ class MohrssCrawler:
         "软件测试",
     ]
 
-    # 二次过滤：站点关键词匹配较宽，标题须命中 IT 信号，正文作为辅助
+    # 二次过滤：标题须命中 IT 信号，正文辅助
     _TECH_TITLE = (
         "工程师", "开发", "算法", "软件", "数据", "人工智能", "嵌入式", "网络安全",
         "前端", "后端", "测试", "运维", "架构", "研发", "程序", "芯片", "机器人",
@@ -90,7 +77,7 @@ class MohrssCrawler:
                 if not self._is_tech(raw):
                     continue
                 seen.add(raw.url)
-                # 列表页摘要过短时，回源详情页抓取完整 JD 正文（gwms 字段）
+                # 摘要过短时回源详情页抓取完整 JD
                 if len(raw.description) < 100:
                     detail = self._fetch_detail(raw.url)
                     if detail:
@@ -135,7 +122,7 @@ class MohrssCrawler:
             city = str(row.get("aab302") or "").strip()
             company = str(row.get("aab004") or "").strip()
             jid = _to_int(row.get("acb200"))
-            # 薪资：acb241/acb242 单位为“元/月”，转换为 K/月 对齐前端口径
+            # 元/月 转 K/月
             sal_min_raw = _to_int(row.get("acb241"))
             sal_max_raw = _to_int(row.get("acb242"))
             sal_min = round(sal_min_raw / 1000, 1) if sal_min_raw > 0 else None
@@ -172,17 +159,13 @@ class MohrssCrawler:
 
 
 class IguopinCrawler:
-    """国聘爬虫：POST 关键词检索 JSON API，解析岗位列表。
-
-    与 MohrssCrawler 互补：mohrss 有薪资数字但 JD 简短，国聘薪资多为「面议」
-    但 JD 正文完整规范。接口免登录，单次响应即含全部字段，无需二跳详情页。
-    """
+    """国聘爬虫：POST 关键词检索 JSON API，解析岗位列表。JD 正文完整规范，与 mohrss 互补。"""
 
     name = "iguopin"
     BASE = "https://gp-api.iguopin.com/api/jobs/v1/recom-job"
     DETAIL_BASE = "https://www.iguopin.com/job/detail"
 
-    # 聚焦国聘的优势供给（央企国企 AI/算法岗 JD 质量高），量小而稳
+    # 央企国企 AI/算法岗 JD 质量高
     KEYWORDS = [
         "大模型",
         "算法工程师",
@@ -192,13 +175,13 @@ class IguopinCrawler:
         "网络安全",
     ]
 
-    # 轻量过滤：关键词检索本已精准，仅剔除明显非技术的岗位（如行政/财务）
+    # 轻量过滤：剔除明显非技术的岗位
     _TECH_TOKENS = (
         "算法", "软件", "开发", "工程师", "数据", "人工智能", "ai", "java", "python",
         "前端", "后端", "测试", "运维", "嵌入式", "安全", "云", "架构", "研发", "程序",
         "芯片", "机器人", "模型", "智能",
     )
-    # 关键词虽命中但职业本质非技术研发的排除项（如「人工智能教师」）
+    # 命中关键词但本质非技术研发的排除项
     _EXCLUDE_TITLE = ("教师", "讲师", "助教", "培训师", "行政", "财务", "人事", "销售", "客服", "猎头", "招聘")
 
     def crawl(self, keyword: str, limit: int = 5, pages: int = 1) -> list[RawJob]:
@@ -235,16 +218,16 @@ class IguopinCrawler:
     def _to_raw(self, row: dict, jid: str) -> RawJob:
         title = str(row.get("job_name") or "").strip()
         description = str(row.get("contents") or "").strip()
-        # 城市取区县级行政区（「北京-海淀区」→「海淀区」，交由 clean.normalize_city 归一市级）
+        # 取区县级行政区，交由 normalize_city 归一
         districts = row.get("district_list") or []
         area = str((districts[0] or {}).get("area_cn") or "") if districts else ""
         city = area.split("-")[-1].rstrip("等") if area else ""
-        # 薪资：国聘央企岗多为面议（is_negotiable/min_wage=0），仅少数岗位写明
+        # 央企岗多为面议，仅少数写明
         sal_min_raw = _to_int(row.get("min_wage"))
         sal_max_raw = _to_int(row.get("max_wage"))
         unit = str(row.get("wage_unit_cn") or "")
         if sal_min_raw > 0 or sal_max_raw > 0:
-            # 按单位换算为 K/月（对齐 mohrss 口径）：元→/1000；万→×10；千→原值
+            # 换算为 K/月：元→/1000，万→×10，千→原值
             if "万" in unit:
                 factor = 10.0
             elif "千" in unit:
@@ -291,7 +274,7 @@ class IguopinCrawler:
         return any(tok in text for tok in self._TECH_TOKENS)
 
 
-# 站点注册表（ingest 按此遍历）
+# 站点注册表
 CRAWLERS = {
     "mohrss": MohrssCrawler,
     "iguopin": IguopinCrawler,
