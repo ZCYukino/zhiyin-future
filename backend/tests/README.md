@@ -38,7 +38,7 @@ python -m pytest --cov=app --cov-report=term -p no:cacheprovider
 最近一次全量结果（用上面那条命令实测）：
 
 ```
-162 passed，行覆盖率 81%（≥60% 要求 ✓）
+163 passed，行覆盖率 81%（≥60% 要求 ✓）
 按模块：matching 95% / extract 97% / clean 100% / auth 100% / settings 94% / ingest 75%
 ```
 
