@@ -15,6 +15,7 @@
           <div class="paper-body">
             <p class="paper-watermark">JOB · SKILL · GRAPH</p>
             <h2 class="story-title">职引未来</h2>
+            <p class="story-subtitle">—— 岗位动态能力图谱与人岗精准适配系统</p>
             <div class="story-divider"></div>
             <p class="story-desc">
               依托多源真实招聘数据，构建「岗位 — 技能」能力图谱，动态追踪岗位能力演化，为人才培养与职业规划提供人岗匹配与差距分析支持。
@@ -431,6 +432,14 @@ onUnmounted(() => { clearSeq() })
   letter-spacing: 5px;
   color: #332113;
 }
+.story-subtitle {
+  margin: 7px 0 0;
+  font-family: 'Noto Serif SC', 'Songti SC', 'STSong', serif;
+  font-size: 13px;
+  letter-spacing: 1.5px;
+  line-height: 1.7;
+  color: rgba(79, 57, 31, 0.78);
+}
 .story-divider {
   width: 54px;
   height: 2px;
@@ -702,6 +711,7 @@ onUnmounted(() => { clearSeq() })
   .login-page { padding: 18px 10px; }
   .story-metrics { grid-template-columns: repeat(2, 1fr); }
   .story-title { font-size: 22px; letter-spacing: 3px; }
+  .story-subtitle { font-size: 12px; letter-spacing: 0.5px; }
   .main-title { font-size: 24px; letter-spacing: 4px; }
   .action-text { font-size: 14px; letter-spacing: 3px; }
   .action-dash { width: 36px; }
