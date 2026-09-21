@@ -1,8 +1,7 @@
 """一次性快照富化：对现有快照逐岗位调用 RAG+LLM 画像生成，回写富文本字段并落盘。
 
 用法：cd backend && D:/Anaconda/python.exe -m app.enrich
-（不重新爬取 JD，仅对已有岗位做 LLM 润色，产出更详细的职责/场景/技能/要求，
-  并把完整岗位画像写入快照 jobProfiles，使详情页接口毫秒级返回、无需再调 LLM。）
+不重新爬取 JD，仅对已有岗位做 LLM 润色，画像写入快照 jobProfiles。
 """
 from __future__ import annotations
 
@@ -14,8 +13,7 @@ from . import store
 from .extract import _infer_stack
 from .ingest import index_vectors
 from .llm import LLMNotConfigured
-# 注意：server 模块内有指向 enrich 的惰性导入（_run_refresh 内），
-# 切勿在 server 顶层新增 `import enrich`，否则启动即循环导入。
+# server 内已惰性导入 enrich，此处不能在 server 顶层新增 import enrich（循环导入）
 from .server import generate_job_profile
 
 logger = logging.getLogger("enrich")
@@ -48,8 +46,7 @@ def enrich_snapshot(
         if progress:
             progress("岗位画像富化", pct)
 
-    # 并行生成（DeepSeek 推理是主要耗时，串行 34×35s≈20min，4 并发可压到 ~6min）
-    # 幂等：已有画像的岗位跳过，重跑只补齐缺失项
+    # 并行生成；已有画像的岗位跳过
     existing = k.get("jobProfiles") or {}
     todo = [j for j in jobs if j["id"] not in existing]
     if not todo:
@@ -84,19 +81,16 @@ def enrich_snapshot(
         if not p:
             continue
         job_profiles[jid] = p
-        # 岗位介绍：职责 + 典型行业应用场景
         job_intro[jid] = {
             "duties": p.get("duties") or [],
             "scenarios": p.get("scenarios") or [],
         }
-        # 任职要求：学历 / 经验 / 证书专业背景等
         req = p.get("requirements") or {}
         job_req[jid] = {
             "education": req.get("education") or "",
             "experience": req.get("experience") or "",
             "extra": req.get("extra") or [],
         }
-        # 技能矩阵：三级资历，每项带 stack + desc（在本岗位的具体用途）
         skills = p.get("skills") or {}
         job_prog[jid] = {
             lv: [
@@ -106,19 +100,15 @@ def enrich_snapshot(
             ]
             for lv in ("junior", "mid", "senior")
         }
-        # 岗位一句话定位：润色 description
         if p.get("overview"):
             job["description"] = p["overview"]
-        # 技能标签：合并富技能名
         names = [s.get("name") for lv in ("junior", "mid", "senior") for s in (skills.get(lv) or [])]
         if names:
             job["skills"] = names[:8]
             job["tags"] = names[:3]
 
     k["meta"] = {**(k.get("meta") or {}), "enriched": True, "jobProfiles": len(job_profiles)}
-    # 顺序：先落盘快照、再重建向量。向量库绝不能比被服务的快照更新——否则 RAG 会检索到
-    # 快照里根本不存在的内容；反过来（快照新、向量旧）只是检索略滞后，可接受。
-    # 且向量化失败不应让一份已生成好的快照作废（反之则会）。
+    # 先落盘快照、再重建向量：向量库不能比被服务的快照新
     path = store.save_snapshot(k)
     if reindex:
         index_vectors(k)

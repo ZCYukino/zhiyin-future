@@ -14,12 +14,11 @@ logger = logging.getLogger("rag")
 def search(query: str, top_k: int = 6) -> list[dict[str, Any]]:
     """向量检索相关 JD 片段。未配置 Key 抛 LLMNotConfigured（配置问题不静默）；网络异常/空库返回空。"""
     try:
-        # embedding（HTTP 调用）在锁外执行以充分利用推理；锁只覆盖集合读段。
-        # 显式传入管理员百炼 Key（检索只服务于管理员触发的采集/画像链路，非用户请求）。
+        # embedding 在锁外执行；显式传管理员百炼 Key
         qe = embed([query], credentials=settings.embed_credentials())[0]
     except LLMNotConfigured:
-        raise  # 未配置 Key 是配置问题，向上抛让调用方明确处理，不静默降级
-    except Exception as e:  # noqa: BLE001 网络异常 → 降级为空（降级但必须留痕，否则向量库坏了看起来像「没结果」）
+        raise  # 配置问题向上抛，不静默降级
+    except Exception as e:  # noqa: BLE001 网络异常降级为空，留痕
         logger.warning("向量检索失败，本次降级为空结果（query=%r）：%s", query, e)
         return []
     with col_lock:
