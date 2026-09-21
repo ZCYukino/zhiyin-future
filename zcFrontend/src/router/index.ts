@@ -76,11 +76,10 @@ router.beforeEach(async (to, _from) => {
     if (!userStore.userInfo) {
       await userStore.init()
     }
-    // token 失效时 init() 会清空 userInfo：必须回落登录页，
-    // 否则会放行到只有登录态才能用的页面（接口 401 后卡在错误态，且顶栏已消失、无路回登录）。
+    // token 失效时 init() 会清空 userInfo，必须回落登录页
     if (!userStore.userInfo) return '/login'
     if (userStore.userInfo.role === 'admin') {
-      return '/admin' // 管理员用「数据管理」页配置，不进用户页
+      return '/admin' // 管理员走数据管理页
     }
   }
 })

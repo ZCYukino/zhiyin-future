@@ -1,6 +1,5 @@
 <template>
   <el-container class="layout-container">
-    <!-- 顶栏 — 纸张风格 -->
     <el-header v-if="userStore.isLoggedIn" class="header">
       <div class="header-inner">
         <div class="logo" @click="router.push('/')">
@@ -97,9 +96,7 @@
       </div>
     </el-header>
 
-    <!-- 主内容区 -->
     <el-main class="main-content" :class="{ 'no-header': !userStore.isLoggedIn }">
-      <!-- 全局浮动岗位名背景 -->
       <div v-if="userStore.isLoggedIn" class="global-careers-layer">
         <div v-for="(item, index) in globalFloatingCareers" :key="index" class="global-career-drift" :style="item.driftStyle">
           <span class="global-career-word" :style="item.wordStyle">{{ item.name }}</span>
@@ -114,7 +111,6 @@
       </router-view>
     </el-main>
 
-    <!-- 修改密码对话框 -->
     <el-dialog v-model="passwordDialogVisible" title="修改密码" width="420px" class="paper-dialog">
       <el-form :model="passwordForm" label-position="top">
         <el-form-item label="原密码">
@@ -150,7 +146,6 @@ const route = useRoute()
 
 userStore.init()
 
-// 能力画像气泡：进入应用时检查是否已生成画像，未生成则提示前往个人中心；已有画像不再显示。
 const profileChecked = ref(false)
 let profileQueryStarted = false
 async function ensureProfileCheck() {
@@ -240,7 +235,6 @@ async function handleChangePassword() {
 </script>
 
 <style>
-/* ===== 全局纸页系统变量 ===== */
 :root {
   --pen-cursor-override: var(--pen-cursor);
 }
@@ -256,7 +250,6 @@ body {
   min-height: 100vh;
 }
 
-/* ===== Header ===== */
 .header {
   position: sticky;
   top: 0;
@@ -353,7 +346,6 @@ body {
   white-space: nowrap;
 }
 
-/* ===== 菜单 — 纸张标签页风格 ===== */
 .menu {
   flex: 1;
   margin: 0 24px;
@@ -431,7 +423,6 @@ body {
   transition: transform 0.2s ease;
 }
 
-/* ===== 用户区域 ===== */
 .user-info { flex-shrink: 0; }
 
 .user-dropdown {
@@ -506,7 +497,6 @@ body {
   margin-right: 6px;
 }
 
-/* ===== 能力画像气泡 ===== */
 .user-info {
   position: relative;
 }
@@ -535,7 +525,6 @@ body {
   z-index: 101;
 }
 
-/* 气泡右侧三角箭头（指向用户区域）：外层深墨描边 + 内层填充 */
 .profile-bubble::before {
   content: '';
   position: absolute;
@@ -583,7 +572,6 @@ body {
   transform: translateY(-50%) translateX(-6px);
 }
 
-/* ===== Main Content ===== */
 .main-content {
   padding: 0;
   min-height: calc(100vh - 56px);
@@ -598,7 +586,6 @@ body {
   overflow: visible;
 }
 
-/* Page wrapper sits above floating layer */
 .page-view-wrapper {
   position: relative;
   z-index: 1;
@@ -609,7 +596,6 @@ body {
   min-height: 100vh;
 }
 
-/* ===== 全局浮动岗位名背景 ===== */
 .global-careers-layer {
   position: absolute;
   inset: 0;
@@ -631,7 +617,6 @@ body {
   padding: 2px 8px;
 }
 
-/* ===== 页面过渡 ===== */
 .page-fade-enter-active,
 .page-fade-leave-active {
   transition: opacity 0.25s ease, transform 0.25s ease;

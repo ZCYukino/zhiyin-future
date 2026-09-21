@@ -1,4 +1,4 @@
-/** 各 provider 的官方获取指引（流程按官网 2026-09 实测核实） */
+/** 各 provider 的官方获取指引 */
 export interface ApiKeyGuide {
   provider: 'deepseek' | 'dashscope'
   title: string

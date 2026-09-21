@@ -1,6 +1,4 @@
-// ============================================================
-// 类型定义与纯函数工具层（数据一律来自后端 /api/v1）
-// ============================================================
+// 类型定义与纯函数工具层（数据来自后端 /api/v1）
 
 /** 岗位分类 */
 export interface JobCategory {
@@ -22,9 +20,7 @@ export const jobCategories: JobCategory[] = [
   { id: 'qa', name: '测试与质量', icon: 'finished', definition: '通过自动化测试、性能测试与质量度量保障软件质量，提升研发效能与交付可信度。' },
 ]
 
-/** 岗位数据
- *  统计类字段（薪资 / 热度 / 在招公司数 / 趋势 / 城市分布）允许为 null：
- *  后端未采集到就不编造，前端统一以「—」或隐藏区块呈现。 */
+/** 岗位数据；统计类字段可为 null（未采集到就不编造），前端以「—」呈现 */
 export interface JobItem {
   id: string
   name: string
@@ -40,11 +36,11 @@ export interface JobItem {
   trend: 'up' | 'stable' | 'down' | null
   skills: string[]
   cityDistribution: { city: string; count: number }[]
-  // 新岗位发现溯源（仅 isNew 岗位，赛题①：多源数据挖掘可溯源）
+  // 新岗位溯源（仅 isNew 岗位）
   source?: string
   confidence?: number
   discoveredDate?: string
-  // 后端 AI 生成数据内嵌（GET /jobs 时由服务端注入）
+  // 后端生成的数据内嵌
   progression?: SkillProgression
   requirements?: JobRequirement
 }
@@ -55,7 +51,7 @@ export type SkillStack = 'ai' | 'backend' | 'cloud' | 'data' | 'embedded' | 'fro
 export interface SkillSpec {
   name: string
   stack: SkillStack
-  /** 该技能在本岗位中的具体用途（后端富化快照注入） */
+  /** 该技能在本岗位中的具体用途 */
   desc?: string
 }
 
@@ -73,13 +69,13 @@ export interface RequirementRow {
 }
 
 export interface JobRequirement {
-  /** 后端未采集到门槛时可能为 null / 空串：对应行不展示 */
+  /** 未采集到门槛时为 null/空串，对应行不展示 */
   education: string | null
   experience: string | null
   extra?: RequirementRow[]
 }
 
-/** 岗位定义要素（赛题①）：核心职责 + 典型行业应用场景 */
+/** 岗位定义要素：核心职责 + 典型应用场景 */
 export interface JobIntroItem {
   name: string
   desc: string
@@ -91,7 +87,7 @@ export interface JobIntro {
 
 export interface GraphNode {
   id: string
-  jobId?: string // 岗位节点对应的岗位 id（后端图谱 job 节点携带）
+  jobId?: string
   label: string
   type: 'job' | 'skill' | 'category'
   category?: string
@@ -133,7 +129,7 @@ export const techStacksForGraph: TechStack[] = [
   { id: 'qa', name: '测试与质量', icon: 'finished', description: '自动化测试、性能测试、质量保障与工程效能' },
 ]
 
-/** 能力演化 — 技能动态变更记录（jobId 为岗位 id，统一 ID 空间） */
+/** 能力演化：技能动态变更记录 */
 export interface CapabilityChange {
   period: string
   jobId: string
@@ -213,7 +209,7 @@ export interface AbilityProfile {
   improvementPriority: string[]
 }
 
-/** 匹配分析报告 — 由后端 /matching/analyze 计算 */
+/** 匹配分析报告 */
 export type SkillLevel = 'junior' | 'mid' | 'senior'
 export type SkillCoverageStatus = 'mastered' | 'partial' | 'missing'
 /** 技能优先级：核心必备 / 重要 / 加分 */
@@ -262,22 +258,22 @@ export interface MatchReport {
   requirements: ReqCheck[]
   learningPath: LearningStage[]
   priorityGaps: Record<SkillPriority, number>
-  /** 学习路径/总结的 LLM 生成状态：ok=真实生成 / no_api_key=未配置 Key / failed=生成失败 */
+  /** 学习路径的 LLM 生成状态：ok / no_api_key / failed */
   llmStatus: 'ok' | 'no_api_key' | 'failed'
 }
 
-/** 后端持久化的匹配报告：连同目标岗位 id 存储，便于再次进入时恢复选择 */
+/** 后端持久化的匹配报告，连同目标岗位 id */
 export interface SavedMatchReport {
   jobId: string
   report: MatchReport
 }
 
-/** 技能优先级：按资历级别映射（与后端 matching.priority_from_level 一致） */
+/** 技能优先级：按资历级别映射 */
 export function priorityOf(level: SkillLevel): SkillPriority {
   return level === 'junior' ? 'must' : level === 'mid' ? 'important' : 'bonus'
 }
 
-/** 从技能名粗略推断 stack（回退场景使用），与 SkillStack 全量对齐 */
+/** 从技能名粗略推断 stack（回退场景） */
 export function inferStackFromName(name: string): SkillStack {
   const n = name.toLowerCase()
   if (['python', 'pytorch', 'tensorflow', 'cuda', 'llm', 'bert', 'transformer', 'cnn', 'rnn', '机器学习', '深度学习', '自然语言', '自然语言处理', '计算机视觉', '语音识别', 'rag', 'agent', '多智能体', 'autogen', 'crewai', 'langchain', 'langgraph', 'rlhf', 'diffusion', 'mamba', 'svm', '决策树', '大模型', 'prompt', '推理', '端侧'].some(k => n.includes(k.toLowerCase()))) return 'ai'
@@ -292,14 +288,14 @@ export function inferStackFromName(name: string): SkillStack {
   return 'tool'
 }
 
-/** API Key 状态（对齐后端 GET /api/v1/apikey） */
+/** API Key 状态 */
 export interface ApiKeyStatus {
   configured: boolean
   masked: string
   updatedAt: string
 }
 
-/** 当前账号的 API Key 配置（普通用户仅 deepseek 键；管理员另有 dashscope） */
+/** 当前账号的 API Key 配置 */
 export interface ApiKeyConfig {
   deepseek: ApiKeyStatus
   dashscope?: ApiKeyStatus
@@ -309,10 +305,7 @@ export interface ApiKeyConfig {
   }
 }
 
-// ============================================================
-// 缺失值展示工具：后端字段可能为 null（未采集到即不编造），
-// 统一以「—」占位，避免出现 0-0K / undefined 这类伪造感数据。
-// ============================================================
+// 缺失值展示：后端字段可能为 null，统一以「—」占位
 
 /** 缺失值占位符 */
 export const MISSING_VALUE = '—'
@@ -327,7 +320,7 @@ export function countText(v: number | null | undefined): string {
   return v == null ? MISSING_VALUE : String(v)
 }
 
-/** 市场趋势符号：null（未采集）时不显示任何符号，绝不默认成「上升」 */
+/** 市场趋势符号：null 时不显示 */
 export function trendGlyph(t: JobItem['trend']): string {
   return t === 'up' ? '↑' : t === 'down' ? '↓' : t === 'stable' ? '→' : ''
 }
@@ -337,12 +330,12 @@ export function trendText(t: JobItem['trend']): string {
   return t === 'up' ? '↑ 上升' : t === 'down' ? '↓ 下降' : t === 'stable' ? '→ 稳定' : ''
 }
 
-/** 岗位能力变更数据源：当前后端仅采集自中国公共招聘网 */
+/** 岗位能力变更数据源 */
 export function capabilitySourceOf(): string[] {
   return ['中国公共招聘网 JD 聚合']
 }
 
-/** 单个周期变更的「更新说明」（数据驱动的解释文案） */
+/** 单个周期变更的更新说明 */
 export function changeReasonOf(c: CapabilityChange): string {
   const parts: string[] = []
   if (c.addedSkills.length) parts.push(`新增 ${c.addedSkills.length} 项核心技能`)
@@ -352,7 +345,7 @@ export function changeReasonOf(c: CapabilityChange): string {
   return parts.join('；') || '岗位技能要求趋于稳定'
 }
 
-/** 全站统一的岗位名清单（首页 / 登录 / 顶栏浮动背景共用，避免重复硬编码） */
+/** 全站统一的岗位名清单 */
 export const careerNames: string[] = [
   '大模型算法工程师', 'AI训练师', 'AI产品经理', '深度学习工程师', 'NLP工程师', '计算机视觉工程师',
   '多模态系统工程师', 'AI代理开发工程师', '模型安全评测工程师', '后端开发工程师', '前端开发工程师',
