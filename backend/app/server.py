@@ -537,7 +537,7 @@ def apikey_get(authorization: str | None = Header(default=None)) -> dict[str, An
 
 @app.put("/api/v1/apikey")
 def apikey_put(body: ApiKeyRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    """保存 Key：先实测校验（deepseek 最小对话 / dashscope 最短向量化），失败拒绝保存。"""
+    """保存 Key：先校验可用性（deepseek 最小对话 / dashscope 最短向量化），失败拒绝保存。"""
     user = _current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="未登录或登录已过期")

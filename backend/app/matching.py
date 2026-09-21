@@ -334,12 +334,10 @@ def _term_in_text(term: str, segments: list[str]) -> bool:
 
 
 def classify_skill(req_name: str, user_skills: list[str], segments: list[str] | None = None) -> str:
-    """三分类：mastered / partial / missing。
+    """三分类 mastered / partial / missing。
 
-    1. 有合取项：逐字写全 → 掌握；全部覆盖 → 掌握；部分 → partial。
-    2. 无合取项且本体命中 → 掌握。
-    3. 举例项覆盖过半 → 掌握，命中部分 → partial。
-    4. 措辞相近 → partial，否则 missing。
+    有合取项时需逐字写全或全部覆盖才算掌握；无合取项看本体命中；
+    举例项覆盖过半即掌握；都不命中时措辞相近判 partial。
     """
     base = normalize_skill_name(req_name)
     conj, alts = skill_parts(req_name)

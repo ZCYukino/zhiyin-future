@@ -68,7 +68,7 @@ def test_shared_substring_rejects_single_generic_morpheme():
     assert shared_substring("系统性能优化", "操作系统") is False
     assert shared_substring("IoT项目开发", "ai辅助开发") is False
     assert shared_substring("自动控制", "版本控制") is False
-    # 反向不得误伤：公共子串是**具体**词而非泛词时照旧判 partial
+    # 反向：公共子串是具体词而非泛词时照旧判 partial
     assert shared_substring("机器学习", "增量学习") is True   # 共「学习」
     assert shared_substring("前端开发", "后端开发") is True   # 共「端开发」，非「开发」
     assert shared_substring("数据标注", "标注质检") is True   # 共「标注」
@@ -301,7 +301,7 @@ def test_skill_parts_splits_ascii_and_slash():
 
 
 def test_classify_skill_matches_parenthetical_content():
-    """岗位技能点常把真正可检的技能名塞进括号，旧实现删括号后匹配不到。"""
+    """岗位技能点常把真正可检的技能名塞进括号，删括号后匹配不到。"""
     ai = "AI基础概念（机器学习、深度学习、大模型、RAG）"
     # 括号是 4 项举例，覆盖过半才算「掌握这个概念」
     assert classify_skill(ai, ["机器学习", "深度学习"]) == "mastered"
@@ -324,7 +324,7 @@ def test_ascii_token_not_swallowed_by_mixed_cjk_string():
     assert contains_match("cvat等", "C") is False
     assert contains_match("C", "cvat等") is False
     assert shared_substring("cvat等", "Java") is False
-    assert shared_substring("prd撰写", "Prompt设计") is False  # 旧实现 'pr' ⊂ 'prompt'
+    assert shared_substring("prd撰写", "Prompt设计") is False  # 'pr' ⊂ 'prompt'
 
 
 def test_shared_substring_rejects_generic_bigram_only():
@@ -374,7 +374,7 @@ def test_generic_ascii_abbreviation_is_not_an_identity():
 
 
 def test_ascii_part_still_matches_across_mixed_strings():
-    """反向：混排里真正相同的 ASCII 词仍须命中（修 bug 不能把这块一起关掉）。"""
+    """反向：混排里真正相同的 ASCII 词仍须命中。"""
     assert contains_match("cvat等", "cvat") is True
     assert contains_match("Label Studio/CVAT等", "Label Studio") is True
     assert contains_match("AI基础概念（机器学习、深度学习、大模型、RAG）", "RAG") is True
