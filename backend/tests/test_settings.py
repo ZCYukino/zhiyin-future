@@ -8,13 +8,7 @@ from app.config import _env
 
 
 def test_env_treats_empty_as_unset(monkeypatch):
-    """空值/纯空白一律按「未设置」处理，回落默认值。
-
-    回归：.env 里写 `DB_PATH=`（冒号后留空）时 dotenv 会把变量设成空串，
-    而 `os.getenv(key, default)` 拿到的是空串不是默认值 —— 照 README 里
-    `copy .env.example .env` 做的用户会拿到空 DB_PATH，SQLite 落到私有临时库上，
-    账号/简历/报告重启后全没。空的 `JWT_EXPIRE_HOURS=` 更直接：int("") 抛错，后端起不来。
-    """
+    """空值/纯空白一律按「未设置」处理，回落默认值。"""
     monkeypatch.setenv("T_EMPTY", "")
     monkeypatch.setenv("T_BLANK", "   ")
     monkeypatch.setenv("T_SET", "deepseek-chat")
@@ -93,8 +87,6 @@ def test_mask_boundaries():
     assert settings.mask("sk-test1234567890abcd") == "sk-tes****abcd"
 
 
-# ===== 凭据本身的保密性（field(repr=False) / compare=False）=====
-
 _SECRET = "sk-supersecret-abcdefghijkl"
 
 
@@ -114,11 +106,7 @@ def test_credentials_repr_and_str_never_contain_api_key():
 
 
 def test_credentials_equality_ignores_key():
-    """刻意为之（compare=False）：相等性只看地址与模型名，Key 不参与比较。
-
-    这是有意的权衡：让 Key 远离 == / 容器去重 / 断言 diff 的输出路径（那里最容易外泄）。
-    代价是「两个凭据 Key 是否相同」不能靠 == 判断，需要时必须显式比较 .api_key。
-    """
+    """compare=False：相等性只看地址与模型名，Key 不参与比较；比 Key 须显式比 .api_key。"""
     a = _cred("sk-aaa-first-key-0000")
     b = _cred("sk-bbb-second-key-1111")
     assert a == b

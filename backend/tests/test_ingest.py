@@ -20,7 +20,6 @@ from app.ingest import (
 from app.crawler.base import RawJob
 
 
-# ===== _infer_category =====
 def test_infer_category():
     assert _infer_category("产品经理", "") == "product"
     assert _infer_category("嵌入式工程师", "") == "embedded"
@@ -33,7 +32,6 @@ def test_infer_category():
     assert _infer_category("算法工程师", "") == "ai"
 
 
-# ===== _skill_levels =====
 def test_skill_levels_with_bonus():
     out = _skill_levels(["a", "b", "c", "d", "e", "f", "g"], ["x", "y"])
     assert out["junior"] == [{"name": "a", "stack": "tool"}, {"name": "b", "stack": "tool"}, {"name": "c", "stack": "tool"}]
@@ -48,7 +46,6 @@ def test_skill_levels_no_bonus_promotes_mid():
     assert [s["name"] for s in out["senior"]] == ["e"]
 
 
-# ===== normalize_education =====
 def test_normalize_education():
     assert normalize_education("不限") == "不限"
     assert normalize_education("博士") == "博士及以上"
@@ -57,7 +54,6 @@ def test_normalize_education():
     assert normalize_education("大专") == "大专及以上"
 
 
-# ===== _aggregate =====
 def test_aggregate_groups_and_cross_validates():
     items = [
         {"name": "后端工程师", "categoryId": "backend", "duties": ["d1"],
@@ -92,13 +88,11 @@ def test_aggregate_single_sample_keeps_all():
     assert out[0]["cityDistribution"] == []
 
 
-# ===== recent_periods =====
 def test_recent_periods():
     assert recent_periods(datetime(2026, 8, 1)) == ("2026上半年", "2026下半年")
     assert recent_periods(datetime(2026, 3, 1)) == ("2025下半年", "2026上半年")
 
 
-# ===== build_job_relations =====
 def test_build_job_relations_advanced_and_transfer():
     jobs = [
         {"id": "1", "name": "软件工程师", "categoryId": "backend", "skills": ["Java", "Python", "SQL"]},
@@ -114,7 +108,6 @@ def test_build_job_relations_advanced_and_transfer():
     assert any(e["relation"] == "transfer" for e in edges)
 
 
-# ===== build_graph =====
 def test_build_graph():
     jobs = [{"id": "1", "name": "后端工程师", "categoryId": "backend", "isNew": False,
              "skills": ["Java", "Kafka"]}]
@@ -126,7 +119,6 @@ def test_build_graph():
     assert any(e["relation"] == "optional" for e in graph["edges"])
 
 
-# ===== archive_jds =====
 def test_archive_jds_dedup(monkeypatch, tmp_path):
     archive_path = tmp_path / "jd_archive.json"
     monkeypatch.setattr(ingest, "JD_ARCHIVE_PATH", archive_path)
@@ -141,7 +133,6 @@ def test_archive_jds_dedup(monkeypatch, tmp_path):
     assert len(data["items"]) == 2
 
 
-# ===== _extract_one（LLM 成功 / 失败返回 None） =====
 def test_extract_one_llm(monkeypatch):
     monkeypatch.setattr(ingest, "extract_job", lambda raw: {
         "name": "后端工程师", "mustSkills": ["Java"], "bonusSkills": [], "categoryId": "backend"})
@@ -157,7 +148,6 @@ def test_extract_one_none_when_llm_fails(monkeypatch):
     assert ingest._extract_one(raw) is None
 
 
-# ===== _discover_one =====
 def test_discover_one(monkeypatch):
     fake = {"name": "AI智能体开发工程师", "categoryId": "ai", "confidence": 0.8,
             "summary": "s", "duties": ["d"], "mustSkills": ["Python"],
@@ -174,7 +164,6 @@ def test_discover_one_low_confidence(monkeypatch):
     assert ingest._discover_one({"name": "x", "seed": "s"}) is None
 
 
-# ===== _capability_change_one =====
 def test_capability_change_one(monkeypatch):
     fake = [{"period": "2026上半年", "addedSkills": ["a"], "removedSkills": [],
              "importanceUp": [], "importanceDown": []}]
@@ -193,7 +182,6 @@ def test_capability_change_one_failed_returns_empty(monkeypatch):
     assert ingest._capability_change_one(j, mb) == []
 
 
-# ===== build_knowledge =====
 def test_build_knowledge(monkeypatch):
     monkeypatch.setattr(ingest, "discover_new_job_defs", lambda *a, **k: [])
     monkeypatch.setattr(ingest, "generate_capability_changes", lambda *a, **k: [])
@@ -210,16 +198,10 @@ def test_build_knowledge(monkeypatch):
     assert "capabilityChanges" in k
 
 
-# ============================================================================
 # 数据丢失防护：空数据 / 失败路径不得清空既有向量库、不得写空快照
-# ============================================================================
 
 def test_index_vectors_empty_jobs_keeps_existing_collection(monkeypatch):
-    """jobs 为空 → 直接返回，绝不清空集合。
-
-    一次「本轮没抓到岗位」若调用 reset_collection，就会把在线 RAG 的语料抹成空库，
-    而本轮并没有任何新向量可写回。
-    """
+    """jobs 为空直接返回，绝不清空集合。"""
     calls: list[str] = []
     monkeypatch.setattr(ingest.store, "reset_collection", lambda: calls.append("reset_collection"))
     monkeypatch.setattr(ingest.store, "upsert_fragments", lambda *a, **k: calls.append("upsert_fragments"))
@@ -235,11 +217,7 @@ def test_index_vectors_empty_jobs_keeps_existing_collection(monkeypatch):
 
 
 def test_index_vectors_embed_failure_keeps_existing_collection(monkeypatch):
-    """embedding 失败 → 异常向上抛，且**尚未** reset（旧集合原样保留）。
-
-    逐批 embed 全部成功后才允许 reset + 重建；否则限流/断网/欠费任何一次失败都会
-    把向量库清空且无人重建。
-    """
+    """embedding 失败向上抛，且尚未 reset（旧集合原样保留）。"""
     calls: list[str] = []
     monkeypatch.setattr(ingest.store, "reset_collection", lambda: calls.append("reset_collection"))
     monkeypatch.setattr(ingest.store, "upsert_fragments", lambda *a, **k: calls.append("upsert_fragments"))
@@ -261,12 +239,7 @@ def test_index_vectors_embed_failure_keeps_existing_collection(monkeypatch):
 
 
 def test_main_aborts_without_side_effects_when_nothing_extracted(monkeypatch):
-    """零产出保护：本轮一个岗位都没抽到时必须抛错，且不向量化、不落快照。
-
-    Key 失效时 generate_json 会把每个非配置类错误都吞成 None，extract_all 于是返回
-    ([], 全部失败)。若继续往下走，就会清空向量库并把 {"jobs": []} 写成最新快照，
-    而 load_latest_snapshot 永远取最新文件 → 全站 0 岗位。
-    """
+    """零产出保护：一个岗位都没抽到时必须抛错，且不向量化、不落快照。"""
     raw = [RawJob(title="岗位A", description="职责描述足够长", url="http://x/1", source="mohrss")]
     monkeypatch.setattr(ingest, "collect_raw", lambda **k: list(raw))
     monkeypatch.setattr(ingest, "clean_pipeline", lambda jobs: list(jobs))
@@ -284,9 +257,7 @@ def test_main_aborts_without_side_effects_when_nothing_extracted(monkeypatch):
     assert side_effects == []
 
 
-# ============================================================================
-# 诚实留空：没有数据源的字段一律 None / []，绝不臆造兜底值
-# ============================================================================
+# 诚实留空：没有数据源的字段一律 None / []
 
 def test_aggregate_invents_nothing_when_samples_lack_data():
     """样本没给薪资/公司数/城市 → 输出留空，不编造区间或默认城市。"""
@@ -332,7 +303,7 @@ def test_discovered_job_leaves_unknown_fields_empty(monkeypatch):
 
 
 def test_build_knowledge_new_job_has_no_fabricated_hot_or_trend(monkeypatch):
-    """组装后的新岗位：hotScore / trend 无数据源 → None（前端显示「—」），不编造涨跌。"""
+    """新岗位 hotScore / trend 无数据源 → None，不编造涨跌。"""
     discovered = _discovered_def(monkeypatch)
     monkeypatch.setattr(ingest, "discover_new_job_defs", lambda *a, **k: [dict(discovered)])
     monkeypatch.setattr(ingest, "generate_capability_changes", lambda *a, **k: [])
@@ -358,10 +329,7 @@ def test_build_knowledge_new_job_has_no_fabricated_hot_or_trend(monkeypatch):
 
 
 def test_normalize_salary_never_returns_degenerate_range():
-    """薪资区间必须始终满足 min < max，且缺失端点不臆造。
-
-    回归：两端都超过 80K 上限的样本曾被钳制成 (80, 80)，前端会显示「80-80K」。
-    """
+    """薪资区间必须始终满足 min < max，且缺失端点不臆造。"""
     from app.ingest import _normalize_salary as norm
 
     # 钳制后仍须 min < max

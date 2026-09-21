@@ -104,8 +104,6 @@ def test_refresh_requires_keys(tmp_db):
     assert "DeepSeek" in ei.value.detail
 
 
-# ===== DELETE 的 provider 白名单与权限（此前未断言）=====
-
 def test_delete_unknown_provider_rejected(tmp_db):
     """未知 provider 必须 400：不能「删了个空」还回 {"ok": true} 假装成功。"""
     u = _mk_user("alice")
@@ -121,8 +119,6 @@ def test_delete_dashscope_forbidden_for_normal_user(tmp_db):
         server.apikey_delete(_auth_for(u), "dashscope")
     assert ei.value.status_code == 403
 
-
-# ===== PUT 响应体同样不得回显明文 Key（此前只断言了 GET 路径）=====
 
 def test_put_response_has_no_plaintext_key(tmp_db, monkeypatch):
     monkeypatch.setattr(llm, "verify_api_key", lambda p, k: None)
@@ -141,8 +137,6 @@ def test_put_response_has_no_plaintext_key(tmp_db, monkeypatch):
     assert plaintext not in repr(resp)
 
 
-# ===== 管理员刷新：普通用户 403（_require_admin 的分支此前无覆盖）=====
-
 def test_admin_refresh_forbidden_for_normal_user(tmp_db):
     u = _mk_user("alice")
     authz = _auth_for(u)
@@ -155,14 +149,12 @@ def test_admin_refresh_forbidden_for_normal_user(tmp_db):
         server.admin_refresh_status(authz)
     assert ei2.value.status_code == 403
 
-    # 被拒的请求不得留下任何刷新状态副作用
+    # 被拒的请求不得留下刷新状态副作用
     assert server._refresh_state["running"] is False
 
 
-# ===== 零相交：匹配报告一律按「鉴权 token 的用户」解析凭据 =====
-
 def _first_job_id() -> str:
-    """取种子快照中的真实岗位 id（app.server 导入时 ensure_seed_snapshot 已落盘）。"""
+    """取种子快照中的真实岗位 id。"""
     snapshot = store.load_latest_snapshot() or {}
     jobs = snapshot.get("jobs") or []
     assert jobs, "缺少种子快照，无法构造匹配请求"
