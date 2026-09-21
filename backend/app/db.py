@@ -1,10 +1,7 @@
 """SQLite 用户存储：连接、建表、密码哈希与用户 CRUD。
 
-密码用 PBKDF2-HMAC-SHA256（格式 `pbkdf2_sha256$迭代次数$盐$摘要`），
-鉴权 token 用标准 JWT（见 app/auth.py），本模块不维护 token 列。
-对外返回 dict 采用前端 UserInfo 的 camelCase 字段。
-
-用 Python 内置 sqlite3（单文件 `backend/data/users.db`），零外部数据库依赖。
+密码 PBKDF2-HMAC-SHA256，token 见 auth.py，对外返回 camelCase 字段；
+基于内置 sqlite3（单文件 backend/data/users.db），零外部数据库依赖。
 """
 from __future__ import annotations
 
@@ -16,7 +13,7 @@ from typing import Any
 
 from . import config
 
-# 建表（含全部历史列；新增列通过下方 PRAGMA 迁移补齐，兼容旧 users.db）
+# 建表（新增列由 _MIGRATIONS 补齐）
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,7 +59,7 @@ _MIGRATIONS = (
     ("match_report", "ALTER TABLE users ADD COLUMN match_report TEXT"),
 )
 
-# API Key 存储（账号级）：每账号每 provider 一行；接口只回显脱敏值，明文不出后端
+# 每账号每 provider 一行，接口只回显脱敏值
 _KEYS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS user_api_keys (
     user_id    INTEGER NOT NULL,
@@ -74,12 +71,7 @@ CREATE TABLE IF NOT EXISTS user_api_keys (
 """
 
 
-# ===== 连接 =====
-
-# 建表已在哪个库文件上跑过（按路径记录，测试里 monkeypatch config.DB_PATH 后会自动重建）。
-# 不依赖「先 import app.server」——`python -m app.ingest` 等入口不导入 server，
-# 旧实现下会撞上 `no such table: user_api_keys`，且该 sqlite 错误不是 LLMNotConfigured，
-# 会被宽泛的 except 吞掉，表现为「所有岗位都失败」而不是「数据库没初始化」。
+# 建表已在哪个库文件跑过（按路径记录，测试 monkeypatch 后自动重建）
 _initialized_path: str | None = None
 
 
@@ -87,28 +79,22 @@ def _connect() -> sqlite3.Connection:
     global _initialized_path
     path = str(config.DB_PATH)
     if _initialized_path != path:
-        # 先置位再建表：init_db() 内部同样调 _connect()，置位可避免无限递归；
-        # 建表连接在使用前就已 close()，不会与本次连接嵌套或死锁。
+        # 先置位再建表，避免 init_db 递归；建表连接用完即关
         _initialized_path = path
         try:
             init_db()
         except Exception:
-            _initialized_path = None  # 建表失败 → 下次连接重试，不留下「假装已初始化」的状态
+            _initialized_path = None  # 建表失败，下次连接重试
             raise
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    conn.isolation_level = None  # 自动提交（等价 pymysql autocommit=True）
+    conn.isolation_level = None  # 自动提交
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
 def init_db() -> None:
-    """幂等建表（含列迁移）。
-
-    由 `_connect()` 在每次进程首次连接某个库文件时自动调用（server 启动时的那次调用
-    因此成为冗余但无害的兜底），保证不导入 app.server 的入口（如 `python -m app.ingest`）
-    也能拿到完整的表结构。
-    """
+    """幂等建表（含列迁移），由 _connect() 在首次连接某库文件时自动调用。"""
     conn = _connect()
     try:
         conn.execute(_SCHEMA)
@@ -120,8 +106,6 @@ def init_db() -> None:
     finally:
         conn.close()
 
-
-# ===== 安全 =====
 
 PBKDF2_ITERATIONS = 100_000
 
@@ -154,8 +138,6 @@ def verify_password(password: str, stored: str) -> bool:
     )
     return secrets.compare_digest(calc.hex(), digest)
 
-
-# ===== 序列化 =====
 
 def _row_to_user(row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | None:
     if not row:
@@ -191,22 +173,13 @@ def _row_to_user(row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | N
     }
 
 
-# ===== 用户 CRUD =====
-
 def is_reserved_username(username: str) -> bool:
-    """内置管理员用户名（去首尾空白后）为系统保留，不允许注册抢占。
-
-    否则在管理员行缺失的库（全新库 / data 卷被清）里，攻击者可抢先注册该用户名，
-    下次启动 ensure_admin 会把它 UPDATE 成 admin → 白拿管理员权限与百炼 Key 槽位。
-    """
+    """内置管理员用户名为系统保留，不允许注册抢占。"""
     return bool(config.ADMIN_USERNAME) and username.strip() == config.ADMIN_USERNAME
 
 
 def create_user(username: str, password: str) -> dict[str, Any] | None:
-    """创建用户并返回 user；用户名已存在（或为保留的管理员用户名）返回 None。
-
-    JWT 由上层 auth 模块签发。
-    """
+    """创建用户并返回 user；用户名已存在返回 None。JWT 由上层签发。"""
     if is_reserved_username(username):
         return None
     conn = _connect()
@@ -226,12 +199,7 @@ def create_user(username: str, password: str) -> dict[str, Any] | None:
 
 
 def ensure_admin(username: str, password: str) -> None:
-    """确保管理员账号存在且具备 admin 角色。
-
-    用户名由 .env 的 ADMIN_USERNAME 决定；密码仅在账号首次创建时用
-    ADMIN_PASSWORD 作为初始密码，之后与普通用户一致（在网页端修改），
-    重启不会重置密码。
-    """
+    """确保管理员账号存在且具备 admin 角色；密码仅首次创建时用初始值，重启不重置。"""
     conn = _connect()
     try:
         row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
@@ -336,8 +304,6 @@ def change_password(user_id: int, old_password: str, new_password: str) -> bool:
         conn.close()
 
 
-# ===== 能力画像 / 匹配报告持久化（每用户一份，重新生成即覆盖） =====
-
 def _save_json_column(user_id: int, column: str, data: dict[str, Any] | None) -> None:
     """把 dict 写入 users 表的指定 JSON 列；data 为 None 时清空该列。"""
     payload = json.dumps(data, ensure_ascii=False) if data is not None else None
@@ -380,8 +346,6 @@ def save_match_report(user_id: int, data: dict[str, Any] | None) -> None:
 def get_match_report(user_id: int) -> dict[str, Any] | None:
     return _get_json_column(user_id, "match_report")
 
-
-# ===== API Key 存储（账号级） =====
 
 def get_user_api_key(user_id: int, provider: str) -> str:
     conn = _connect()
