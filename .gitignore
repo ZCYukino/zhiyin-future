@@ -31,3 +31,6 @@ zcFrontend/tmp_*.png
 # 误生成的构建配置产物（由 tsc -b 或误编译产生）
 zcFrontend/vite.config.js
 zcFrontend/vite.config.d.ts
+
+# 可视化设计会话产物
+.superpowers/
