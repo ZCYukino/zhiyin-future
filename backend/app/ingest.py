@@ -23,8 +23,7 @@ from .seed import SEED_KEYWORDS, SEED_RAW_JOBS
 
 logger = logging.getLogger("ingest")
 
-# 清洗后 JD 的累积存档（跨轮去重）：赛题可验证性要求「至少 100 条岗位 JD」的数据底座，
-# 也是 docs/测试方案/ 中 JD 语料与 JD 解析测试用例的导出来源。
+# 清洗后 JD 的累积存档（跨轮去重）
 JD_ARCHIVE_PATH = config.DATA_DIR / "raw_jds" / "jd_archive.json"
 
 
@@ -72,8 +71,7 @@ def archive_jds(cleaned: list[RawJob]) -> int:
     logger.info("JD 存档：本轮新增 %d 条，累计 %d 条 → %s", added, len(items), JD_ARCHIVE_PATH)
     return len(items)
 
-# 垂直晋升阶梯（权威岗位名对，lower → upper）：用于关系图谱的 advanced（晋升）边。
-# 名字必须与快照中 jobs[].name 精确一致。
+# 垂直晋升阶梯（lower→upper），名字须与快照 jobs[].name 一致
 JOB_LADDERS: list[tuple[str, str]] = [
     ("运维工程师", "运维主管"),
     ("软件工程师", "AI模型算法工程师"),
@@ -118,11 +116,10 @@ def _infer_category(title: str, text: str) -> str:
         return "product"
     if any(k in t for k in ("嵌入式", "物联网", "iot", "rtos", "arm", "芯片", "驱动开发")):
         return "embedded"
-    # 安全先于测试：用「渗透/漏洞/安全审计」等专有词，避免「安全测试」误命中。
-    # 注意：不用「风控」这类宽泛词（「金融风控」是业务场景而非安全岗位，会导致新岗位误分类）。
+    # 安全先于测试：用专有词，不用「风控」这类宽泛词
     if any(k in t for k in ("渗透", "攻防", "漏洞挖掘", "漏洞复现", "安全审计", "安全体系", "网络安全", "安全工程师", "waf", "siem", "反欺诈", "风控工程师", "风险控制", "应急响应")):
         return "security"
-    # 测试用「测试开发/自动化测试」等，避免「渗透测试」误命中
+    # 用「测试开发/自动化测试」，避免「渗透测试」误命中
     if any(k in t for k in ("测试开发", "自动化测试", "测试框架", "接口测试", "性能测试", "质量保障")):
         return "qa"
     if any(k in t for k in ("数据分析", "数据仓库", "大数据", "etl", "商业智能", "数据挖掘")):
@@ -141,7 +138,7 @@ def _extract_one(raw: RawJob) -> dict[str, Any] | None:
     try:
         d = extract_job(raw)
     except LLMNotConfigured:
-        raise  # 配置问题向上抛，让刷新任务整体失败并给出明确原因
+        raise  # 配置问题向上抛，让刷新任务整体失败
     except Exception as e:  # noqa: BLE001
         logger.warning("LLM 抽取失败（跳过该岗位）%s：%s", raw.title, e)
         return None
@@ -182,18 +179,13 @@ def extract_all(
 
 
 def _skill_levels(must: list[str], bonus: list[str]) -> dict[str, list[dict[str, str]]]:
-    """把 must/bonus 技能分配到 junior/mid/senior（规则近似，无重复）。
-
-    必备技能按优先级填入初级/中级，加分技能优先填入高级，不足再回填必备技能，
-    使每个等级尽量都有 3 项，避免岗位技能矩阵过于稀疏。
-    """
+    """把 must/bonus 技能分配到 junior/mid/senior，使每个等级尽量都有 3 项。"""
     must = must or []
     bonus = bonus or []
     junior = must[:3]
     mid = must[3:6]
     senior = bonus[:3] or must[6:9]
-    # 高级为空但中级有富余时，把中级尾部技能上提，保证高级也有内容
-    # （mid = must[3:6] 最多 3 项，原先的 >= 4 是永远不成立的死分支，改为 >= 2）
+    # 高级为空时把中级尾部技能上提
     if not senior and len(mid) >= 2:
         senior = [mid[-1]]
         mid = mid[:-1]
@@ -214,18 +206,12 @@ def normalize_education(edu: str) -> str:
     for key, canon in (("博士", "博士及以上"), ("硕士", "硕士及以上"), ("本科", "本科及以上"), ("大专", "大专及以上")):
         if key in e:
             return canon
-    # 未识别的表述原样返回（可能是 ""）——不臆造学历
+    # 未识别的表述原样返回，不臆造学历
     return e
 
 
 def _normalize_salary(lo: float | None, hi: float | None) -> tuple[float | None, float | None]:
-    """清洗薪资区间：四舍五入为整数、修正退化/倒挂区间、钳制到合理边界。
-
-    爬虫对年薪/月薪换算易产生 16.666、9.167 等浮点尾数，且个别样本 min==max
-    （如 6-6K）或倒挂，此处统一收敛为整数且 min<max 的区间。
-
-    缺失语义：任一端点缺失/≤0 即返回 (None, None)——不臆造缺失侧，也不编造默认区间。
-    """
+    """清洗薪资区间：取整、修正退化/倒挂区间、钳制到合理边界；任一端缺失即 (None, None)。"""
     if lo is None or hi is None:
         return None, None
     lo = round(lo)
@@ -234,8 +220,7 @@ def _normalize_salary(lo: float | None, hi: float | None) -> tuple[float | None,
         return None, None
     if hi <= lo:
         hi = round(lo * 1.3)
-    # 上限留 1K 余量：否则两端都超过 80 的样本钳制后会退化成 min==max（如 (100,120)→(80,80)），
-    # 与「收敛为 min<max」的语义相悖。先钳 lo 再钳 hi 并保证 hi ≥ lo+1。
+    # 上限留 1K 余量，先钳 lo 再钳 hi 并保证 hi ≥ lo+1
     lo = max(3, min(lo, 79))
     hi = max(lo + 1, min(hi, 80))
     return lo, hi
@@ -250,29 +235,29 @@ def _aggregate(extracted: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for name, items in groups.items():
         n = len(items)
-        # 样本 ≥3 时技能要求多源支持度 ≥2，否则全保留（避免单样本信息丢失）
+        # 样本 ≥3 时支持度 ≥2，否则全保留
         min_support = 2 if n >= 3 else 1
         must = cross_validate_skills([d.get("mustSkills", []) or [] for d in items], min_support=min_support)
         bonus = cross_validate_skills([d.get("bonusSkills", []) or [] for d in items], min_support=min_support)
-        # 交叉验证把技能全部过滤（LLM 多源命名不一致）时，退化为并集（对已抽取真实数据的重组）
+        # 交叉验证全部过滤时退化为并集
         if not must and not bonus:
             must = list(dict.fromkeys(s for d in items for s in (d.get("mustSkills") or [])))
             bonus = list(dict.fromkeys(s for d in items for s in (d.get("bonusSkills") or [])))
         duties = next((d.get("duties") or [] for d in items if d.get("duties")), [])
         education = normalize_education(Counter(d.get("education") or "" for d in items).most_common(1)[0][0])
-        # 经验取众数；LLM 未给出时留空串（不编造年限）
+        # 经验取众数，未给出时留空串
         experience = Counter(d.get("experience") or "" for d in items).most_common(1)[0][0]
         category_id = Counter(d.get("categoryId") or "" for d in items).most_common(1)[0][0] or "ai"
-        # 薪资取各样本中位数，避免离群值；再统一清洗尾数/退化区间
+        # 薪资取中位数，再清洗尾数/退化区间
         sals = [(d.get("salaryMin") or 0, d.get("salaryMax") or 0) for d in items]
         sals = [s for s in sals if s[1] > 0]
         if sals:
             salary_min = sorted(s[0] for s in sals)[len(sals) // 2]
             salary_max = sorted(s[1] for s in sals)[len(sals) // 2]
         else:
-            salary_min, salary_max = None, None  # 无任何样本给出薪资 → 不臆造区间
+            salary_min, salary_max = None, None  # 无样本给出薪资，不臆造
         salary_min, salary_max = _normalize_salary(salary_min, salary_max)
-        # 城市分布：剔除空城市（省/未知区已归一为空）；全空则留空（不编造）
+        # 城市分布：剔除空城市；全空则留空
         city_counter: Counter[str] = Counter(
             c for d in items if (c := (d.get("_city") or "").strip())
         )
@@ -289,15 +274,14 @@ def _aggregate(extracted: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "salaryMin": salary_min,
                 "salaryMax": salary_max,
                 "cityDistribution": city_dist,
-                "companyCount": None,  # 招聘公司数无数据源，留空由前端显示「—」
+                "companyCount": None,  # 无数据源，前端显示「—」
                 "sampleCount": n,
             }
         )
     return out
 
 
-# 新兴岗位候选（赛题①「新岗位发现」）：人工提供萌芽方向种子，LLM 生成规范定义
-# salaryMin/salaryMax 为现实月薪区间（K/月），避免新岗位统一套用虚高的 25-60K。
+# 新兴岗位候选：人工提供萌芽方向种子，LLM 生成规范定义；薪资为现实月薪区间（K/月）
 NEW_JOB_CANDIDATES: list[dict[str, Any]] = [
     {"name": "AI智能体开发工程师", "salaryMin": 20, "salaryMax": 45, "seed": "负责基于大语言模型的智能体（Agent）系统设计与开发，涵盖多智能体协作、工具调用、任务规划、记忆管理与评测，融合 RAG、LangChain 等技术栈。"},
     {"name": "大模型安全评测工程师", "salaryMin": 20, "salaryMax": 40, "seed": "负责大语言模型的安全评测与对齐，包括红队测试、内容安全、越狱防护、价值观对齐、偏见检测与对抗样本评估，保障模型安全合规。"},
@@ -325,7 +309,7 @@ def _discover_one(cand: dict[str, Any]) -> dict[str, Any] | None:
     if confidence < 0.5:
         return None
     summary = d.get("summary") or ""
-    # 分类优先采用 LLM 判断（带分类定义约束），仅当 LLM 未返回合法分类时回退规则推断
+    # 分类优先采用 LLM 判断，未返回合法分类时回退规则推断
     cat = d.get("categoryId")
     if cat not in CATEGORY_IDS:
         cat = _infer_category(d["name"], summary)
@@ -335,10 +319,10 @@ def _discover_one(cand: dict[str, Any]) -> dict[str, Any] | None:
         "duties": d.get("duties") or [],
         "mustSkills": d.get("mustSkills") or [],
         "bonusSkills": d.get("bonusSkills") or [],
-        # 学历/经验/城市/公司数：新岗位无 JD 样本，一律留空（不臆造）
+        # 新岗位无 JD 样本，学历/经验留空
         "education": None,
         "experience": None,
-        # 薪资取 NEW_JOB_CANDIDATES 中人工给定的现实参考区间（真实值，非编造）；未给定则留空
+        # 薪资取人工给定的参考区间，未给定则留空
         "salaryMin": cand.get("salaryMin"),
         "salaryMax": cand.get("salaryMax"),
         "cityDistribution": [],
@@ -435,7 +419,7 @@ def build_knowledge(
 ) -> dict[str, Any]:
     """把抽取结果组装成对齐前端结构的知识库 JSON。progress(done, total) 在能力演化阶段回调。"""
     aggregated = _aggregate(extracted)
-    # 新岗位发现（赛题①）：LLM 生成新兴岗位定义，追加到聚合结果统一组装
+    # LLM 生成新兴岗位定义，追加到聚合结果统一组装
     n_old = len(aggregated)
     aggregated.extend(discover_new_job_defs())
 
@@ -460,15 +444,14 @@ def build_knowledge(
                 "salaryUnit": "K/月",
                 "description": d.get("_summary") or ("；".join(duties[:3]) if duties else d["name"]),
                 "tags": skills[:3],
-                # 热度：老岗位由真实样本数派生（sampleCount 越大说明市场招聘越密集）；
-                # 新岗位无样本依据，留 None 由前端显示「—」，不编造。
+                # 热度：老岗位由样本数派生，新岗位无样本依据留 None
                 "hotScore": None if is_new else min(60 + d["sampleCount"] * 8, 99),
                 "isNew": is_new,
                 "source": d.get("_source") if is_new else None,
                 "confidence": d.get("_confidence") if is_new else None,
                 "discoveredDate": today if is_new else None,
                 "companyCount": d.get("companyCount"),
-                "trend": None,  # 无趋势数据源，不编造涨跌
+                "trend": None,  # 无趋势数据源，不编造
                 "skills": skills,
                 "cityDistribution": d["cityDistribution"],
             }
@@ -485,7 +468,7 @@ def build_knowledge(
                 }
             )
 
-    # 能力演化记录（赛题②）：真实 LLM 生成，失败的岗位无轨迹
+    # 能力演化记录：LLM 生成，失败的岗位无轨迹
     capability_changes = generate_capability_changes(jobs, must_bonus, progress=progress)
 
     return {
@@ -516,16 +499,10 @@ def build_knowledge(
 
 
 def build_job_relations(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """生成 job→job 关系边：advanced（垂直晋升，权威阶梯）+ transfer（横向换岗，技能重叠）。
-
-    - advanced：来自 `JOB_LADDERS` 阶梯，两端岗位名都在 jobs 中时生成「晋升」边。
-    - transfer：不同分类的岗位两两比较，共享技能数 ≥2 视为可横向迁移；每岗位按共享数
-      降序至多保留 2 条，并用有序 id 对去重，避免 a→b 与 b→a 重复。
-    """
+    """生成 job→job 关系边：advanced（垂直晋升阶梯）+ transfer（横向换岗，技能重叠≥2）。"""
     edges: list[dict[str, Any]] = []
     by_name = {j["name"]: j for j in jobs}
 
-    # 垂直晋升（权威阶梯）
     for lower, upper in JOB_LADDERS:
         a, b = by_name.get(lower), by_name.get(upper)
         if a and b:
@@ -539,7 +516,7 @@ def build_job_relations(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 }
             )
 
-    # 横向换岗（不同分类 + 技能重叠 ≥2）
+    # 横向换岗：不同分类 + 技能重叠 ≥2
     skill_by_id = {j["id"]: set(j.get("skills") or []) for j in jobs}
     cat_by_id = {j["id"]: j["categoryId"] for j in jobs}
     candidates: dict[str, list[tuple[int, str]]] = defaultdict(list)
@@ -630,19 +607,13 @@ def build_graph(
                     "relation": "optional",
                 }
             )
-    # 关系图谱（赛题：垂直晋升 + 横向换岗）——job→job 边
+    # 垂直晋升 + 横向换岗的 job→job 边
     edges.extend(build_job_relations(jobs))
     return {"nodes": nodes, "edges": edges}
 
 
 def index_vectors(knowledge: dict[str, Any]) -> None:
-    """把岗位知识片段 embedding 写入 ChromaDB（供 RAG 检索增强）。
-
-    片段包含职责/场景/任职要求/技能矩阵等结构化信息，使岗位详情页的 LLM
-    画像生成能拿到更完整的真实数据参考（而非仅一句短描述）。
-
-    空库保护：jobs 为空时直接返回，**不**重建/清空集合（否则一次空快照会抹掉可用向量）。
-    """
+    """把岗位知识片段 embedding 写入 ChromaDB（供 RAG 检索）；jobs 为空时不重建集合。"""
     jobs = knowledge.get("jobs", []) or []
     if not jobs:
         logger.warning("无岗位可向量化，保留既有向量集合不动")
@@ -672,10 +643,7 @@ def index_vectors(knowledge: dict[str, Any]) -> None:
         ids.append(jid)
         texts.append(text)
         metas.append({"source": f"job-{jid}", "name": j["name"]})
-    # 阿里云 text-embedding-v3 单次 batch 上限为 10，分批向量化。
-    # 先把全部 embedding 算完，全部成功后才在下方 reset + 重建集合：任何一批 embed
-    # 失败（限流/断网/未配 Key）都会在此抛出，旧向量集合保持原样。切勿在函数开头
-    # 调用 reset_collection，那会在 embed 失败时把在线向量库清成空库且无人重建。
+    # text-embedding-v3 单次 batch 上限 10；全部算完才重建集合，embed 失败不动旧索引
     embs: list[list[float]] = []
     for start in range(0, len(texts), 10):
         embs.extend(embed(texts[start:start + 10], credentials=settings.embed_credentials()))
@@ -697,7 +665,7 @@ def main(
 
     logger.info("=== 开始离线采集 ===")
     report("采集原始 JD", 3)
-    # limit=10/关键词：mohrss 16 词 + 国聘 6 词，单轮有效 JD 目标 ≥100 条（赛题测试数据要求）
+    # 单轮有效 JD 目标 ≥100 条
     raw = collect_raw(use_crawler=use_crawler, limit_per_kw=10)
     report("清洗数据", 18)
     cleaned = clean_pipeline(raw)
@@ -719,11 +687,8 @@ def main(
         extracted,
         progress=lambda done, total: report("组装知识库", 60 + int(done / total * 13)),
     )
-    # 零产出保护（必须在 index_vectors/save_snapshot 之前）：
-    # Key 失效/被吊销时 generate_json 把每个非配置类 LLM 错误都吞成 None，extract_all 于是
-    # 返回 ([], 全部失败名)，build_knowledge 得到空 jobs。若继续往下走，就会清空向量库并把
-    # {"jobs": []} 写成最新快照，而 load_latest_snapshot 永远取最新文件 → 全站 0 岗位。
-    # 这里直接抛错：server._run_refresh 捕获后写入 _refresh_state["error"]，管理员能看到原因。
+    # 零产出保护：Key 失效时 extract_all 返回空，继续走会清空向量库并写入空快照；
+    # 这里抛错，刷新状态里管理员能看到原因
     if not extracted:
         raise RuntimeError(
             f"本轮未抽取到任何岗位（{len(cleaned)} 条 JD 全部失败），已保留原有数据，未写入新快照"
@@ -732,9 +697,7 @@ def main(
         raise RuntimeError(
             f"本轮组装结果为空（{len(cleaned)} 条 JD 抽取后未形成任何岗位），已保留原有数据，未写入新快照"
         )
-    # 顺序与 enrich 一致：**先落盘快照、再重建向量**。向量库绝不能比被服务的快照更新，
-    # 否则 RAG 会检索到快照里根本不存在的内容。反过来（快照新、向量旧）只是检索略滞后，
-    # 可接受——index_vectors 也是先把全部 embedding 算完才动集合，embed 失败不会破坏旧索引。
+    # 先落盘快照、再重建向量：向量库不能比被服务的快照新
     report("快照落盘", 75)
     path = store.save_snapshot(knowledge)
     report("向量化索引", 92)
