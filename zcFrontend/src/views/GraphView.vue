@@ -1,7 +1,6 @@
 <template>
   <div class="graph-page">
     <div class="graph-content">
-      <!-- 标题 -->
       <section class="page-hero">
         <div class="hero-paper">
           <h1 class="hero-title">岗位图谱</h1>
@@ -9,7 +8,6 @@
         </div>
       </section>
 
-      <!-- 控制栏：视图 Tab + 全局筛选（技术栈 / 级别） -->
       <div class="graph-toolbar">
         <div class="toolbar-left">
           <span class="toolbar-label">视角：</span>
@@ -20,26 +18,22 @@
           </div>
         </div>
         <div class="toolbar-right">
-          <!-- 技术栈筛选（全景概览 / 关系总览共用） -->
           <div v-if="viewMode === 'panorama' || (viewMode === 'relations' && !relationsFocusNode)" class="chip-selector">
             <button class="chip-btn" :class="{ active: relStackFilter === 'all' }" @click="setStackFilter('all')">全部</button>
             <button v-for="ts in techStacksForGraph" :key="ts.id" class="chip-btn" :class="{ active: relStackFilter === ts.id }" @click="setStackFilter(ts.id)">{{ ts.name }}</button>
           </div>
-          <!-- 级别筛选（全景聚焦某岗位后生效） -->
           <div v-if="viewMode === 'panorama' && focusJob" class="chip-selector">
             <button class="chip-btn" :class="{ active: activeLevel === 'all' }" @click="selectLevel('all')">全部级别</button>
             <button class="chip-btn" :class="{ active: activeLevel === 'junior' }" @click="selectLevel('junior')">初级</button>
             <button class="chip-btn" :class="{ active: activeLevel === 'mid' }" @click="selectLevel('mid')">中级</button>
             <button class="chip-btn" :class="{ active: activeLevel === 'senior' }" @click="selectLevel('senior')">高级</button>
           </div>
-          <!-- 关系聚焦：返回岗位列表 -->
           <template v-if="viewMode === 'relations' && relationsFocusNode">
             <button class="tool-btn" @click="relationsBackToOverview"><IconEpRefresh class="tool-btn-icon" /> 返回岗位列表</button>
           </template>
         </div>
       </div>
 
-      <!-- 聚焦指示（含层级面包屑） -->
       <div v-if="allJobs.length" class="focus-crumb">
         <span class="crumb-mode">{{ modeLabel }}</span>
         <span class="crumb-sep">·</span>
@@ -50,16 +44,12 @@
         </template>
       </div>
 
-      <!-- 空态（后端无数据） -->
       <div v-if="!allJobs.length" class="graph-empty">
         图谱数据加载中，或后端服务未启动。
       </div>
 
-      <!-- 主体两栏 -->
       <div v-if="allJobs.length" class="graph-main">
-        <!-- 中：画布 / 演化 -->
         <div class="graph-center">
-          <!-- 全景：分组岗位卡片（全部 / 按技术栈筛选） -->
           <div v-if="viewMode === 'panorama' && !focusJob" class="all-stacks">
             <section v-for="b in allStackBlocks" :key="b.ts.id" class="stack-card">
               <div class="stack-card-head">
@@ -78,7 +68,6 @@
             <p v-if="!allStackBlocks.length" class="all-stacks-empty">暂无岗位数据</p>
           </div>
 
-          <!-- 关系图谱总览：按技术栈分组的岗位卡片（点岗位 → 看它的换岗邻域） -->
           <div v-if="viewMode === 'relations' && !relationsFocusNode" class="all-stacks">
             <p class="rels-hint">
               <span class="rels-hint-gap">绿色「<b>N 关系</b>」= 该岗位有横向换岗 / 垂直晋升，点击进入看邻域</span>
@@ -106,7 +95,6 @@
             <p v-if="!relationsStackBlocks.length" class="all-stacks-empty">暂无岗位数据</p>
           </div>
 
-          <!-- 聚焦上下文条：岗位名 + 醒目返回（紧贴画布，用户一眼可见） -->
           <div v-if="viewMode === 'panorama' && focusJob" class="canvas-focus-bar">
             <div class="cfb-title">
               <span class="cfb-eyebrow">能力图谱</span>
@@ -118,21 +106,16 @@
             </button>
           </div>
 
-          <!-- G6 画布：岗位聚焦时的技能点环绕 / 关系图谱换岗邻域 -->
           <div v-show="showCanvas" ref="graphContainer" class="graph-canvas"></div>
 
-          <!-- 关系图谱空态：后端无关系数据 -->
           <div v-if="viewMode === 'relations' && !relationJobs.length" class="graph-empty">
             暂无岗位关系数据。请在后端重新生成知识库快照（ingest），以派生岗位晋升 / 换岗关系。
           </div>
-          <!-- 关系图谱空态：聚焦的岗位没有任何关系 -->
           <div v-if="viewMode === 'relations' && relationsFocusNode && !relationsTransferTo.length && !relationsAdvanceTo.length && !relationsPromotedFrom.length" class="graph-empty">
             「{{ relationsFocusNode.label }}」暂无横向换岗 / 垂直晋升关系，试试点击其它岗位。
           </div>
 
-          <!-- 演化视图 -->
           <div v-if="viewMode === 'evolution'" class="evolution-view">
-            <!-- 市场总览 -->
             <section class="market-overview">
               <h3 class="market-title">市场总览 · 近两年技能动向</h3>
               <p class="market-sub">聚合全部岗位的演化记录，回答"该学什么、该弃什么"。</p>
@@ -164,7 +147,6 @@
               </div>
             </section>
 
-            <!-- 按岗位 -->
             <section v-if="selectedEvoChanges.length" class="evo-detail">
               <h3 class="evo-detail-title">{{ selectedEvoJobName }} — 能力动态演化</h3>
               <p class="evo-subtitle">该岗位近两年技能点的新增、淘汰与重要性变化。</p>
@@ -199,7 +181,6 @@
             </section>
           </div>
 
-          <!-- 图例（仅岗位聚焦技能点）：与真实药丸一致——级别=药丸底色，趋势=药丸内符号 -->
           <div v-if="viewMode === 'panorama' && focusJob" class="graph-legend">
             <span class="legend-title">图例</span>
             <span class="legend-group">
@@ -217,7 +198,6 @@
             </span>
           </div>
 
-          <!-- 图例（关系图谱，仅聚焦画布时）：横向换岗（实线·主）/ 垂直晋升（细虚线·辅助） -->
           <div v-if="viewMode === 'relations' && relationsFocusNode" class="graph-legend">
             <span class="legend-title">方位</span>
             <span class="legend-group">
@@ -227,13 +207,9 @@
           </div>
         </div>
 
-        <!-- 右：常驻详情列 -->
         <aside class="graph-aside">
-          <!-- 全景图谱 -->
           <template v-if="viewMode === 'panorama'">
-            <!-- 聚焦某岗位 -->
             <template v-if="focusJob">
-              <!-- 技能节点被选中 -->
               <div v-if="selectedNode && selectedNode.type === 'skill'" class="aside-paper">
                 <h4 class="aside-title">
                   {{ selectedNode.label }}
@@ -258,7 +234,6 @@
                 </div>
                 <p class="aside-hint">点击岗位名可跳转其能力图谱；点画布空白处返回。</p>
               </div>
-              <!-- 默认：该岗位技能点 -->
               <template v-else>
                 <div class="aside-paper">
                   <h4 class="aside-title">{{ focusJobNode?.label }}</h4>
@@ -277,7 +252,6 @@
                 </div>
               </template>
             </template>
-            <!-- 全景总览引导（未聚焦岗位时） -->
             <div v-else class="aside-paper">
               <h4 class="aside-title">全景图谱</h4>
               <p class="aside-sublabel">共 {{ allJobs.length }} 个岗位 · {{ stackCount }} 个技术栈方向</p>
@@ -285,9 +259,7 @@
             </div>
           </template>
 
-          <!-- 关系图谱 -->
           <template v-else-if="viewMode === 'relations'">
-            <!-- 总览：引导 + 晋升阶梯（辅助参考） -->
             <template v-if="!relationsFocusNode">
               <div class="aside-paper">
                 <h4 class="aside-title">关系图谱</h4>
@@ -311,7 +283,6 @@
                 </div>
               </div>
             </template>
-            <!-- 选中岗位：横向换岗技能对比（主） + 垂直晋升（辅助） -->
             <template v-else>
               <div class="aside-paper">
                 <h4 class="aside-title">{{ relationsFocusNode.label }}</h4>
@@ -364,7 +335,6 @@
             </template>
           </template>
 
-          <!-- 能力演化 -->
           <template v-else>
             <div class="aside-paper">
               <h4 class="aside-title">选择岗位</h4>
@@ -403,24 +373,21 @@ const graphContainer = ref<HTMLElement>()
 let graph: Graph | null = null
 let currentNodes: GraphNode[] = []
 let currentEdges: GraphEdge[] = []
-/** 画布平移进行中：此时内容在指针下滑动，抑制悬停高亮重渲染，避免拖动「不跟手/断触」 */
+/** 拖动画布时抑制悬停高亮，避免拖动卡顿 */
 let dragging = false
 
 const viewMode = ref<ViewMode>('panorama')
-// 聚焦的岗位（graph 节点 id）；null = 全景概览
+// 当前聚焦岗位，null 表示全景概览
 const focusJob = ref<string | null>(null)
-// 关系图谱聚焦的岗位 id；null = 关系总览
 const relationsFocus = ref<string | null>(null)
-// 关系画布当前悬停 / 选中的换岗目标（用于点亮右栏对应技能条）
+// 悬停的换岗目标，用于点亮右栏技能条
 const relationsHighlight = ref<string | null>(null)
 const activeTechStack = ref<string>('all')
-// 关系总览的技术栈筛选（与全景各自独立，避免切换视角残留）
 const activeRelStack = ref<string>('all')
 const activeLevel = ref<'all' | Level>('all')
 const selectedNode = ref<GraphNode | null>(null)
 const selectedEvoJob = ref<string>('')
 
-// 能力图谱：岗位所需技能（图谱关系 ∪ 技能矩阵，并集）
 interface CapSkill {
   node: GraphNode
   edge: GraphEdge | null
@@ -429,7 +396,6 @@ interface CapSkill {
   trend: Trend
 }
 
-// ===== 数据源：纯后端（无 mock） =====
 const graphData = ref<{ nodes: GraphNode[]; edges: GraphEdge[] }>({ nodes: [], edges: [] })
 const capabilityChanges = ref<CapabilityChange[]>([])
 const jobItems = ref<JobItem[]>([])
@@ -438,7 +404,6 @@ const allJobs = computed(() => graphData.value.nodes.filter(n => n.type === 'job
 const allSkills = computed(() => graphData.value.nodes.filter(n => n.type === 'skill'))
 const stackCount = computed(() => new Set(allJobs.value.map(j => j.techStack).filter(Boolean)).size)
 
-// ===== 关系图谱：job→job 的晋升（advanced）/ 换岗（transfer）边 =====
 const relationEdges = computed(() =>
   graphData.value.edges.filter(e =>
     e.source.startsWith('job-') && e.target.startsWith('job-') &&
@@ -453,7 +418,7 @@ const relationJobs = computed(() => {
 const relationsFocusNode = computed(() =>
   relationsFocus.value ? allJobs.value.find(j => j.id === relationsFocus.value) || null : null
 )
-// 晋升阶梯：从无上级（无 advanced 指向）的岗位出发，沿 advanced 边 DFS 枚举全部根→叶链路
+// 沿晋升边枚举根到叶链路
 const relationLadders = computed(() => {
   const adv = relationEdges.value.filter(e => e.relation === 'advanced')
   const children = new Map<string, string[]>()
@@ -478,12 +443,10 @@ const relationLadders = computed(() => {
   return chains
 })
 
-// 当前下钻的技术栈方向
 const currentStack = computed(() => techStacksForGraph.find(t => t.id === activeTechStack.value))
 const currentStackName = computed(() => currentStack.value?.name || '')
 const currentStackJobs = computed(() => allJobs.value.filter(j => j.techStack === activeTechStack.value))
 
-// 全景卡片：按技术栈分组（「全部」显示全部方向，或筛到单个方向）
 const allStackBlocks = computed(() =>
   techStacksForGraph
     .filter(ts => allJobs.value.some(j => j.techStack === ts.id))
@@ -496,7 +459,6 @@ const techStackColors: Record<string, string> = {
   cloud: '#4a2a1a', security: '#7a2a22', embedded: '#4c3a1e', product: '#a0722f', qa: '#6b5a48',
 }
 
-// ===== 技能等级工具 =====
 function levelWord(level?: Level | null): string {
   return level === 'junior' ? '初级' : level === 'mid' ? '中级' : level === 'senior' ? '高级' : ''
 }
@@ -504,20 +466,17 @@ function levelSize(level: Level): number {
   return level === 'junior' ? 22 : level === 'mid' ? 26 : 30
 }
 
-// 三条臂颜色：初级(绿)/中级(琥珀)/高级(墨红) —— 让「一线一难度」一眼可辨
 const LEVEL_COLORS: Record<Level, string> = {
   junior: '#2f6b46',
   mid: '#b45309',
   senior: '#7a2a22',
 }
 
-// 图岗位 → /jobs → 技能递进矩阵
 function progressionOf(jobNode: GraphNode | null | undefined): SkillProgression | undefined {
   if (!jobNode?.jobId) return undefined
   return jobItems.value.find(x => x.id === jobNode.jobId)?.progression
 }
 
-// ===== 技能趋势：由能力演化记录聚合 =====
 function findSkillId(changeStr: string): string | undefined {
   if (!changeStr) return undefined
   for (const s of allSkills.value) {
@@ -544,13 +503,12 @@ const skillTrendMap = computed(() => {
   return map
 })
 
-// ===== 计算属性 =====
 const focusJobNode = computed<GraphNode | null>(() => {
   if (!focusJob.value) return null
   return allJobs.value.find(j => j.id === focusJob.value) || null
 })
 
-// 岗位所需全部技能 = 该岗位技能矩阵（与岗位详情同一数据源，展示一致）；无矩阵时退回图谱关联技能
+// 优先用技能矩阵，无矩阵时退回图谱关联技能
 const focusJobAllSkills = computed<CapSkill[]>(() => {
   const jobNode = focusJobNode.value
   if (!jobNode) return []
@@ -558,7 +516,6 @@ const focusJobAllSkills = computed<CapSkill[]>(() => {
 
   const prog = progressionOf(jobNode)
   if (prog) {
-    // 主源：技能矩阵（与岗位详情逐项对齐），复用图谱技能节点 id 以便跨岗位关联；避免同技能跨级重复
     const list: CapSkill[] = []
     const seen = new Set<string>()
     const levels: { key: Level; specs: SkillSpec[] }[] = [
@@ -568,13 +525,11 @@ const focusJobAllSkills = computed<CapSkill[]>(() => {
     ]
     levels.forEach(({ key, specs }) => {
       specs.forEach((spec, idx) => {
-        // 复用图谱技能节点 id（保留趋势/跨岗位关联），但标签用矩阵名（与岗位详情一致）
         const gid = findSkillId(spec.name)
         const base = gid ? allSkills.value.find(s => s.id === gid) : undefined
         const node: GraphNode = base
           ? { ...base, label: spec.name }
           : { id: `prog-${jobId}-${key}-${idx}`, label: spec.name, type: 'skill', level: key === 'junior' ? 'entry' : key, size: levelSize(key) }
-        // 把矩阵的用途/技术栈直接挂在节点上，点击药丸时无需再靠模糊匹配回找
         ;(node as any)._mName = spec.name
         ;(node as any)._mDesc = spec.desc
         ;(node as any)._mStack = spec.stack
@@ -586,7 +541,6 @@ const focusJobAllSkills = computed<CapSkill[]>(() => {
     return list
   }
 
-  // 无矩阵的诚实降级：退回图谱关联技能（job→skill 边）
   return graphData.value.edges
     .filter(e => e.source === jobId && e.target.startsWith('skill-'))
     .map(e => {
@@ -600,7 +554,6 @@ const focusJobAllSkills = computed<CapSkill[]>(() => {
 const focusJobSkillTotal = computed(() => focusJobAllSkills.value.length)
 const focusJobHasProgression = computed(() => !!progressionOf(focusJobNode.value))
 
-// 按资历分级分组（无技能矩阵时退回单组）
 const focusJobSkillGroups = computed(() => {
   const groups: { label: string; items: CapSkill[] }[] = []
   if (!focusJobHasProgression.value) {
@@ -628,7 +581,6 @@ const skillOtherJobs = computed(() => {
     .filter(x => x.job)
 })
 
-// ===== 选中技能 → 技能介绍（类似岗位详情技能点：用途 desc + 级别/优先级/技术栈） =====
 function skillDescOf(name: string): { desc?: string; stack?: SkillStack; level?: Level } {
   if (!name) return {}
   const prog = progressionOf(focusJobNode.value)
@@ -659,7 +611,6 @@ const selectedSkillIntro = computed(() => {
   if (!sk || sk.type !== 'skill') return null
   const trend = skillTrendMap.value.get(sk.id) || 'stable'
   const lvl = (sk as any)._lvl as Level | undefined
-  // 矩阵药丸自带 _mName/_mDesc/_mStack（与岗位详情同源）；图谱降级技能才靠模糊匹配兜底
   const mName = (sk as any)._mName || sk.label
   const mDesc = (sk as any)._mDesc as string | undefined
   const mStack = (sk as any)._mStack as SkillStack | undefined
@@ -678,8 +629,6 @@ const selectedSkillIntro = computed(() => {
 })
 
 function skillsOfJob(jobId: string): Set<string> {
-  // 与能力图谱同源：以技能矩阵为主（映射到图谱技能节点 id），保证换岗/晋升的「所差」与展示一致；
-  // 无矩阵时退回图谱 job→skill 边。
   const jobNode = allJobs.value.find(j => j.id === jobId)
   const prog = jobNode ? progressionOf(jobNode) : undefined
   if (prog) {
@@ -697,7 +646,6 @@ function skillsOfJob(jobId: string): Set<string> {
   )
 }
 
-// 关系图谱聚焦：晋升方向（可晋升到 / 由谁晋升而来）+ 横向换岗
 const relationsAdvanceTo = computed(() =>
   relationEdges.value
     .filter(e => e.relation === 'advanced' && e.source === relationsFocus.value)
@@ -721,17 +669,15 @@ const relationsTransferTo = computed(() => {
       const other = allJobs.value.find(j => j.id === otherId)!
       const otherSkills = skillsOfJob(otherId)
       const labelOf = (sid: string) => allSkills.value.find(s => s.id === sid)?.label || sid
-      // ✅ 已具备 = 目标岗位所需 ∩ 当前岗位已有；➕ 所差 = 目标岗位所需 − 当前岗位已有
+      // 已具备=两岗位技能交集，所差=目标岗位独有
       const have = [...otherSkills].filter(sid => srcSkills.has(sid)).map(labelOf)
       const diff = [...otherSkills].filter(sid => !srcSkills.has(sid)).map(labelOf)
       return { job: other, edge: e, have, diff }
     })
     .filter(x => x.job)
-    // 按技能重合度降序：最接近、最容易横跳的岗位排最前
     .sort((a, b) => b.have.length - a.have.length || a.diff.length - b.diff.length)
 })
 
-// ===== 关系总览：按技术栈分组的岗位卡片（取代「全部岗位一屏画完」的密集画布） =====
 const relationsStackBlocks = computed(() =>
   techStacksForGraph
     .filter(ts => allJobs.value.some(j => j.techStack === ts.id))
@@ -743,8 +689,7 @@ function relCountOf(jobId: string): number {
   return relationEdges.value.filter(e => e.source === jobId || e.target === jobId).length
 }
 
-// 热门岗位方向 Top9：按 /jobs.hotScore 关联评分降序取前 9 个
-// hotScore 可能为 null（后端未采集到）：此时退回图谱侧的新/热标记，再退回中性 50
+// hotScore 缺失时退回新/热标记，再退回 50
 const evolvableJobs = computed(() => {
   const fallbackOf = (j: GraphNode): number => (j.isHot ? 90 : j.isNew ? 80 : 50)
   const hotScore = (j: GraphNode): number => {
@@ -764,7 +709,6 @@ const selectedEvoChanges = computed(() =>
 
 const selectedEvoJobName = computed(() => allJobs.value.find(j => j.id === selectedEvoJob.value)?.label || '')
 
-// 市场总览：聚合全部岗位的演化记录
 const marketOverview = computed(() => {
   const added = new Map<string, number>()
   const removed = new Map<string, number>()
@@ -810,14 +754,12 @@ const focusLabel = computed(() => {
 function trendLabel(t?: Trend): string { return t === 'up' ? '上升' : t === 'down' ? '下降' : '稳定' }
 function trendGlyph(t?: Trend): string { return t === 'up' ? '▲' : t === 'down' ? '▼' : '●' }
 
-// 是否显示 G6 画布：全景聚焦某岗位；关系图谱只在「聚焦某岗位」时画它的换岗邻域
 const showCanvas = computed(() =>
   viewMode.value === 'relations'
     ? !!relationsFocusNode.value
     : viewMode.value === 'panorama' && !!focusJob.value
 )
 
-// ===== 视图切换 =====
 function switchView(mode: ViewMode) {
   viewMode.value = mode
   selectedNode.value = null
@@ -825,7 +767,6 @@ function switchView(mode: ViewMode) {
     if (graph) { graph.destroy(); graph = null }
     if (!selectedEvoJob.value && evolvableJobs.value[0]) selectedEvoJob.value = evolvableJobs.value[0].id
   } else if (mode === 'relations') {
-    // 关系模式默认回到「岗位列表」总览（HTML 卡片），不再一屏画全部关系
     relationsFocus.value = null
     relationsHighlight.value = null
     if (graph) { graph.destroy(); graph = null }
@@ -834,14 +775,12 @@ function switchView(mode: ViewMode) {
   }
 }
 
-/** 关系图谱：聚焦某岗位 → 画它的「横向换岗邻域」 */
 function focusRelationsJob(jobId: string) {
   relationsFocus.value = jobId
   relationsHighlight.value = null
   nextTick(() => initRelationsGraph())
 }
 
-/** 关系总览点击：无关系岗位不进空聚焦，直接弹提示，避免「点进去发现什么都没有」 */
 function relationsJobClick(jobId: string) {
   if (!relationJobIds.value.has(jobId)) {
     const job = allJobs.value.find(j => j.id === jobId)
@@ -851,7 +790,6 @@ function relationsJobClick(jobId: string) {
   focusRelationsJob(jobId)
 }
 
-/** 关系图谱：回到岗位列表总览 */
 function relationsBackToOverview() {
   relationsFocus.value = null
   relationsHighlight.value = null
@@ -864,7 +802,6 @@ function backToOverview() {
   nextTick(() => initGraph())
 }
 
-/** 聚焦某岗位：原地展开其技能点 */
 function openJobAbility(jobId: string) {
   focusJob.value = jobId
   selectedNode.value = null
@@ -878,7 +815,6 @@ function selectTechStack(id: string) {
   if (viewMode.value === 'panorama') nextTick(() => initGraph())
 }
 
-// 顶栏技术栈筛选：全景 / 关系总览共用同一组 chip，按当前视角分发
 const relStackFilter = computed(() => viewMode.value === 'relations' ? activeRelStack.value : activeTechStack.value)
 function setStackFilter(id: string) {
   if (viewMode.value === 'relations') {
@@ -897,11 +833,9 @@ function selectLevel(level: 'all' | Level) {
   if (viewMode.value === 'panorama' && focusJob.value) nextTick(() => initGraph())
 }
 
-// ===== 图谱初始化 =====
 function nodeStyle(d: any): any {
   const node = d as GraphNode
   if (node.type === 'job') {
-    // 中心岗位：墨色大圆 + 岗位名内嵌（聚焦焦点，文字已入圆中）
     const color = techStackColors[node.techStack || ''] || '#5a3d28'
     return {
       size: (node as any)._jobD || 72,
@@ -918,7 +852,6 @@ function nodeStyle(d: any): any {
       ...(node.isNew ? { stroke: '#c2410c' } : {}),
     }
   }
-  // 技能节点：文字内嵌的「药丸」——按臂级别填色（初/中/高），内侧注趋势符号（▲升/▼跌/●稳）
   const lvlColor = (node as any)._lvlColor || '#5a3d28'
   const plw = (node as any)._plw || 60
   const plh = (node as any)._plh || 34
@@ -942,7 +875,6 @@ function nodeStyle(d: any): any {
 
 function edgeStyle(d: any): any {
   const edge = d as GraphEdge
-  // 三臂三角形：每条臂是颜色一致的醒目实线（中心→首技能更粗，链式顺延）
   const stroke = (edge as any)._lvlColor || '#8a7560'
   return {
     stroke,
@@ -952,36 +884,30 @@ function edgeStyle(d: any): any {
   }
 }
 
-// ===== 岗位聚焦：三臂三角布局 =====
-// 岗位居中，向 120° 方向伸出的三条臂（初级/中级/高级）呈三角形；
-// 每条臂上的同级别技能点沿臂链式排布，臂即连成一条醒目实线。
-// 关键：超长技能名截断（防溢出）+ 画布高度随该岗位技能数自适应（防空/挤）。
+// 岗位居中，初/中/高三级各伸一条臂
 function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: GraphEdge[]; height: number } {
   const job = focusJobNode.value
   if (!job) return { nodes: [], edges: [], height: 400 }
-  const baseR = 134 // 首药丸距中心的半径——越过中心圆并留出间隙（防对角药丸撞入中心）
-  const PER_ARM = 5 // 每条臂最多展示 5 个技能（其余见右侧分组）
-  // 药丸高度随资历递增：初级/中级/高级
+  const baseR = 134 // 首个药丸距中心的半径
+  const PER_ARM = 5 // 每条臂最多展示 5 个技能
   const pillH = (l: Level) => (l === 'junior' ? 36 : l === 'mid' ? 40 : 44)
-  // 超长技能名截断：>6 字则省略，完整名见侧栏
+  // 超 6 字截断，全名在侧栏
   const disp = (s: string) => (s.length > 6 ? s.slice(0, 5) + '…' : s)
-  // 趋势符号：▲升 / ▼跌 / ●稳
   const glyphOf = (x: CapSkill): string => {
     const t = skillTrendMap.value.get(x.node.id) || 'stable'
     return t === 'up' ? '▲' : t === 'down' ? '▼' : '●'
   }
-  // 药丸宽：按「符号+名字」实际字符数估算（中文≈12px, 坐标固定不缩放故字稍大更清晰），并限幅防超长撑破画布
+  // 药丸宽度按字符数估算
   const pillWOf = (x: CapSkill, l: Level) => {
     const s = disp(x.node.label)
     const gl = glyphOf(x)
     return Math.min(140, Math.max(48, (s.length + gl.length) * 12 + 22))
   }
-  // 中心岗位圆：直径随岗位名（截断后）撑开，粗体文字内嵌其中（字 14px, 直径上限 100 防过大）
   const jobDisp = job.label.length > 6 ? job.label.slice(0, 5) + '…' : job.label
   const jobD = Math.min(100, Math.max(62, (jobDisp.length + 1) * 14 + 10))
   const jobR = jobD / 2
 
-  // 按资历分组；无级别的技能点按图谱关系回退到初/中/高
+  // 无级别的技能按图谱关系回退
   const levelOf = (x: CapSkill): Level =>
     x.level || (x.edge?.relation === 'core' ? 'junior' : x.edge?.relation === 'required' ? 'mid' : 'senior')
   const buckets: Record<Level, CapSkill[]> = { junior: [], mid: [], senior: [] }
@@ -990,7 +916,6 @@ function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: 
     : focusJobAllSkills.value.filter(x => x.level === activeLevel.value)
   skills.forEach(x => buckets[levelOf(x)].push(x))
 
-  // 手臂数量随「已填充级别数」自适应：1 臂朝上、2 臂上下对开、3 臂 120° 呈三角形
   const filledLevels = (['junior', 'mid', 'senior'] as Level[]).filter(l => buckets[l].length)
   const arms: { key: Level; angle: number }[] =
     filledLevels.length === 1
@@ -998,23 +923,21 @@ function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: 
       : filledLevels.length === 2
         ? [{ key: filledLevels[0], angle: 270 }, { key: filledLevels[1], angle: 90 }]
         : [
-            { key: 'junior', angle: 270 }, // 上
-            { key: 'mid', angle: 30 },     // 右下
-            { key: 'senior', angle: 150 }, // 左下
+            { key: 'junior', angle: 270 },
+            { key: 'mid', angle: 30 },
+            { key: 'senior', angle: 150 },
           ]
 
-  // 臂最长半径：按半画宽限幅，防对角线药丸冲出画布
   const Rmax = Math.max(baseR, Math.min(430, Math.floor((width / 2 - 142) / 0.866)))
 
-  // 先算每条臂的可容纳技能数（竖直臂看高度、对角臂看宽度——相邻药丸不重叠），据此定长度与 cy。
+  // 竖直臂按高度排、对角臂按宽度排，避免相邻药丸重叠
   const plan = arms.map(arm => {
     const cos = Math.cos((arm.angle * Math.PI) / 180)
     const list = buckets[arm.key]
-    const isVert = Math.abs(cos) < 0.1 // 竖直臂（270/90）：cos≈0
+    const isVert = Math.abs(cos) < 0.1
     const h = pillH(arm.key)
     let maxW = 46
     list.slice(0, PER_ARM).forEach(x => { maxW = Math.max(maxW, pillWOf(x, arm.key)) })
-    // 对角臂需按「斜线±左右半宽」拉开，避免相邻药丸左右重叠；竖直臂按高度即可
     const step = isVert ? h + 12 : maxW / 0.866 + 10
     const n = Math.min(list.length, PER_ARM, 1 + Math.floor((Rmax - baseR) / step))
     const len = baseR + Math.max(0, n - 1) * step
@@ -1023,7 +946,6 @@ function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: 
 
   const nodes: GraphNode[] = []
   const edges: GraphEdge[] = []
-  // 先以「中心岗位」为原点放置节点，再按整簇真实边界整体平移 → 画布内精确居中
   job.x = 0
   job.y = 0
   ;(job as any)._jobD = jobD
@@ -1063,7 +985,6 @@ function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: 
     })
   }
 
-  // 整簇边界：中心圆 ±jobR；技能药丸按宽/高半值（悬停/选中仅加描边不改尺寸，留 1.02 供描边不裁）
   const halfPad = 1.02
   let minX = -jobR
   let maxX = jobR
@@ -1079,7 +1000,6 @@ function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: 
     maxY = Math.max(maxY, n.y + hh)
   })
 
-  // 以整簇中心为基准换算画布尺寸与整体平移量：簇中心精确落到画布中心
   const cX = (minX + maxX) / 2
   const cY = (minY + maxY) / 2
   const pad = 70
@@ -1092,8 +1012,7 @@ function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: 
   return { nodes, edges, height }
 }
 
-/** 画布最小高度：填满 .graph-center 面板可见奶油区（去掉顶部聚焦条占高），
- *  否则 G6 视口(高度=内容高)比面板矮，拖动时内容会在面板内提前被裁切（“没到边就消失”）。 */
+/** 画布至少填满面板可见高度，否则拖动时内容会被提前裁切 */
 function canvasMinHeight(): number {
   const panel = graphContainer.value?.parentElement as HTMLElement | null
   if (!panel) return 560
@@ -1104,7 +1023,6 @@ function canvasMinHeight(): number {
 
 function initGraph() {
   if (!graphContainer.value) return
-  // 全景卡片模式（未聚焦岗位）无需 G6 画布
   if (!focusJob.value) {
     if (graph) { graph.destroy(); graph = null }
     return
@@ -1125,21 +1043,14 @@ function initGraph() {
     width,
     height,
     animation: true,
-    // 坐标均预计算，不跑布局
     layout: undefined,
-    // 中心 job → circle，技能药丸 → rect（文字内嵌）
     node: {
       type: (d: any) => (d.type === 'job' ? 'circle' : 'rect'),
       style: (d: any) => nodeStyle(d),
       state: {
-        // active（悬停）：仅加橙环 + 文字轻微加粗，取消任何尺寸放大/扩散，杜绝「光晕」感。
-        // 注意：G6 默认主题的 active/selected 会带 halo:true（大光圈），必须显式 halo:false 关掉，否则光标移到药丸/选中后
-        // 会在节点周围渲染一圈低透明度的「光圈」扩散（正是用户反馈的「光晕」）。
+        // G6 主题默认的 halo 光圈需要显式关闭
         active: (d: any) => ({ halo: false, opacity: 1, lineWidth: 3.5, stroke: '#c2410c', labelFontSize: d.type === 'job' ? 15 : 12 }),
-        // selected（单击选中）：不绘制任何环/光晕，仅保持不淡出；其余技能靠 dimmed 淡出形成对比。
-        // 同样必须 halo:false，并把 lineWidth/stroke 复位为基调，避免继承主题 selected 的加粗黑边框。
         selected: (d: any) => ({ halo: false, opacity: 1, lineWidth: d.type === 'job' ? 3 : 1.4, stroke: '#2a1a0e' }),
-        // dimmed（选中某技能后，其余技能淡出，突出当前选中，形成强「确认感」）
         dimmed: (d: any) => ({ halo: false, opacity: 0.32 }),
       },
     },
@@ -1151,8 +1062,7 @@ function initGraph() {
         dimmed: { opacity: 0.18 },
       },
     },
-    // 固定布局：禁止缩放（滚轮/双击放大），仅保留背景平移。移除 drag-element（节点由布局算法定位，
-    // 拖动无意义）与 hover-activate（degree:1 会把 1 度邻接一并点亮→「一团乱亮」）。悬停为自定义逻辑。
+    // 任意位置按下都可平移画布
     behaviors: [{ type: 'drag-canvas', enable: () => true }],
     autoFit: false,
     padding: [24, 24, 24, 24],
@@ -1165,28 +1075,23 @@ function initGraph() {
   } as any)
   graph.render()
 
-  // 悬停：技能橙环、入边高亮；单击：技能选中（其余技能/边淡出，选中技能不再加环）
   let hoverTargets: string[] = []
   let selectedId: string | null = null
 
   const nodeById = (id: string) => currentNodes.find(n => n.id === id)
 
-  // 合并节点当前应具备的状态。
-  // 关键：一旦某技能被选中，选中技能本身只保留「selected」（不叠加任何悬停环/光晕），
-  // 剩余技能一律「dimmed」淡出——彻底杜绝「点击后鼠标移开仍有光圈扩散」。
+  // 选中后：选中项保持 selected，其余技能 dimmed 淡出
   function statesForNode(id: string): string[] {
     const nd = nodeById(id)
     if (!nd) return []
     if (selectedId && nd.type === 'skill') {
       return id === selectedId ? ['selected'] : ['dimmed']
     }
-    // 未选中状态：仅悬停的节点亮橙环
     const s: string[] = []
     if (hoverTargets.includes(id)) s.push('active')
     return s
   }
 
-  // 边状态：关联其目标技能——悬停高亮橙、选中高亮墨、选中时其它边淡出
   function edgeStates(edge: GraphEdge): string[] {
     const s: string[] = []
     if (nodeById(edge.target)?.type !== 'skill') return s
@@ -1204,7 +1109,6 @@ function initGraph() {
   function setActive(id: string, on: boolean) {
     const nd = nodeById(id)
     if (!nd || !graph) return
-    // 只高亮当前悬停节点本身，不再联动中心岗位（root 根节点）
     const targets = [id]
     if (on) {
       targets.forEach(t => { if (!hoverTargets.includes(t)) hoverTargets.push(t) })
@@ -1217,16 +1121,13 @@ function initGraph() {
 
   function setSelected(id: string | null) {
     selectedId = id
-    // 选中变化会影响「其它技能淡出」与所有边，整体刷新一次
     currentNodes.forEach(n => graph!.setElementState(n.id, statesForNode(n.id)))
     applyEdgeStates()
   }
 
   graph.on('node:pointerenter', (evt: any) => { const id = evt.target?.id; if (id && !dragging) setActive(id, true) })
   graph.on('node:pointerleave', (evt: any) => { const id = evt.target?.id; if (id && !dragging) setActive(id, false) })
-  // 指针离开整个画布时，清掉可能残留的悬停环（防止「移开仍有光圈」）
   graph.on('canvas:pointerleave', () => { if (!dragging && hoverTargets.length) setActive(hoverTargets[0], false) })
-  // 拖拽画布期间抑制悬停高亮，并在拖拽开始清掉残留高亮，防止内容平移后高亮错位/卡顿
   graph.on('dragstart', () => { dragging = true; hoverTargets = []; setSelected(selectedId) })
   graph.on('dragend', () => { dragging = false })
 
@@ -1236,30 +1137,25 @@ function initGraph() {
     const nd = nodeById(id)
     if (!nd) return
     if (nd.type === 'job') {
-      // 点击中心岗位 → 取消技能选中，回到该岗位全览
       selectedNode.value = null
       setSelected(null)
       return
     }
-    // 技能节点 → 侧栏显示关联岗位 + 持久选中（入边加粗 + 其余淡出，选中技能自身不加环/光晕）；
-    // 清空悬停集，确保选中的药丸上不留任何残留光圈。
     selectedNode.value = { ...nd }
     hoverTargets = []
     setSelected(id)
   })
   graph.on('canvas:click', () => {
-    // 点空白只取消技能选中，不再返回全景（返回由画布上方醒目「返回全景」按钮承担）
     selectedNode.value = null
     setSelected(null)
   })
 }
 
-// ===== 关系图谱：按技术栈分列 + 晋升阶梯自上而下排布 =====
 function jobPillW(j: GraphNode): number {
   return Math.min(150, Math.max(96, j.label.length * 13 + 32))
 }
 
-// _relKind：center=居中当前岗位 / transfer=横向换岗目标（主角）/ advance=垂直晋升（辅助，弱化）
+// 节点角色：center 当前岗位 / transfer 换岗目标 / advance 晋升
 function relationsNodeStyle(d: any): any {
   const node = d as GraphNode
   const kind = (node as any)._relKind || 'transfer'
@@ -1279,7 +1175,6 @@ function relationsNodeStyle(d: any): any {
       labelFill: '#fbf3e2', labelPlacement: 'center', opacity: 0.85,
     }
   }
-  // 横向换岗目标：技术栈着色，突出
   return {
     size: [w, 40], radius: 20, fill: stackColor, stroke: '#2a1a0e', lineWidth: 1.6,
     labelText: node.label, labelFontSize: 13, labelFontWeight: 700,
@@ -1287,7 +1182,6 @@ function relationsNodeStyle(d: any): any {
   }
 }
 
-// 换岗=主角（实线、粗、深色）；晋升=辅助（细虚线、弱化）
 function relationsEdgeStyle(d: any): any {
   const edge = d as GraphEdge
   const isTransfer = edge.relation === 'transfer'
@@ -1295,7 +1189,6 @@ function relationsEdgeStyle(d: any): any {
     stroke: isTransfer ? '#3b2412' : 'rgba(138,117,96,0.75)',
     lineWidth: isTransfer ? 2.2 : 1.2,
     lineDash: isTransfer ? undefined : [5, 4],
-    // 方向箭头：换岗→右（横向），晋升→上（垂直），让「从什么到什么」一眼可见
     endArrow: true,
     labelText: edge.label || (isTransfer ? '换岗' : '晋升'),
     labelFontSize: isTransfer ? 11 : 9,
@@ -1309,11 +1202,7 @@ function relationsEdgeStyle(d: any): any {
   }
 }
 
-// 聚焦单岗位的「岗位关系」布局：统一的方位逻辑（当前岗位居中锚点）
-//   · 上方 = 可晋升到（垂直向上，更高层级）
-//   · 下方 = 由以下晋升而来（垂直向下，更低层级）
-//   · 右侧 = 横向换岗（同级，全部排在同一列）
-// 以中心岗位为原点摆放，最后按整簇包围盒整体居中，保证任何数据下都居中、方位一致。
+// 方位固定：上=可晋升到，下=由以下晋升而来，右=横向换岗
 function buildRelationsFocusLayout(width: number, minH = 320): { nodes: GraphNode[]; edges: GraphEdge[]; height: number } {
   const src = relationsFocusNode.value!
   const transfers = relationsTransferTo.value
@@ -1323,28 +1212,24 @@ function buildRelationsFocusLayout(width: number, minH = 320): { nodes: GraphNod
   const nodes: GraphNode[] = []
   const edges: GraphEdge[] = []
 
-  const rowGap = 88   // 右侧换岗列纵向间距
-  const armX = 260    // 右侧换岗列距中心岗位的水平距离
-  const upY = 168     // 上方可晋升排距中心的垂直距离
-  const downY = 168   // 下方晋升来源排距中心的垂直距离
-  const colGap = 40   // 上/下晋升排内水平间距
+  const rowGap = 88
+  const armX = 260
+  const upY = 168
+  const downY = 168
+  const colGap = 40
 
-  // 右侧换岗列总跨距（纵向），用于让换岗目标相对中心岗位呈上下扇形
   const armSpan = Math.max(0, transfers.length - 1) * rowGap
   const hwOf = (n: GraphNode) => ((n as any)._relW || 120) / 2
   const rowW = (list: typeof transfers) => list.reduce((s, t) => s + jobPillW(t.job), 0) + colGap * Math.max(0, list.length - 1)
 
-  // 中心岗位（原点）
   nodes.push({ ...src, x: 0, y: 0, _relW: jobPillW(src) + 24, _relKind: 'center' } as any)
 
-  // 右侧换岗列：全部在右侧，按技能重合度降序，最匹配的靠上
   transfers.forEach((t, i) => {
     const y = -armSpan / 2 + i * rowGap
     nodes.push({ ...t.job, x: armX, y, _relW: jobPillW(t.job), _relKind: 'transfer' } as any)
     edges.push({ source: src.id, target: t.job.id, label: t.edge.label || '换岗', weight: 1, relation: 'transfer' })
   })
 
-  // 上方：可晋升到（以中心岗位为中心水平铺开）
   if (upList.length) {
     let x = -rowW(upList) / 2
     upList.forEach(t => {
@@ -1354,7 +1239,6 @@ function buildRelationsFocusLayout(width: number, minH = 320): { nodes: GraphNod
       x += w + colGap
     })
   }
-  // 下方：由以下晋升而来（以中心岗位为中心水平铺开）
   if (downList.length) {
     let x = -rowW(downList) / 2
     downList.forEach(t => {
@@ -1365,8 +1249,7 @@ function buildRelationsFocusLayout(width: number, minH = 320): { nodes: GraphNod
     })
   }
 
-  // 定位：以「中心岗位」为锚——水平置于画布中心（换岗朝其右侧展开），垂直按整簇包围盒居中；
-  // 并用边界夹紧，确保任何数据下图谱不越出画布。
+  // 按包围盒居中，边界夹紧防越界
   let height = 320
   if (nodes.length) {
     const halfOf = (n: GraphNode) => {
@@ -1381,7 +1264,6 @@ function buildRelationsFocusLayout(width: number, minH = 320): { nodes: GraphNod
     const pad = 40
     const contentH = maxY - minY
     height = Math.max(minH, contentH + 2 * pad)
-    // 水平：岗位(原点)放到画布中心；若换岗/晋升内容超出边界则夹紧
     let dx = width / 2
     dx = Math.min(dx, width - pad - maxX)
     dx = Math.max(dx, pad - minX)
@@ -1394,7 +1276,6 @@ function buildRelationsFocusLayout(width: number, minH = 320): { nodes: GraphNod
 
 function initRelationsGraph() {
   if (!graphContainer.value) return
-  // 只在聚焦某岗位、且该岗位确有关系时渲染；否则回到 HTML 总览
   const focus = relationsFocusNode.value
   if (!focus) {
     if (graph) { graph.destroy(); graph = null }
@@ -1409,7 +1290,6 @@ function initRelationsGraph() {
 
   const container = graphContainer.value
   const width = container.clientWidth || 1000
-  // 画布高至少填满面板可见奶油区，消除“视口矮于面板 → 拖动提前裁切”的问题
   const { nodes, edges, height } = buildRelationsFocusLayout(width, canvasMinHeight())
   container.style.height = height + 'px'
 
@@ -1433,8 +1313,6 @@ function initRelationsGraph() {
       state: { active: { opacity: 1, lineWidth: 2.8, stroke: '#c2410c' } },
     },
     behaviors: [{ type: 'drag-canvas', enable: () => true }],
-    // 不缩放：节点保持真实像素尺寸（与全景图谱一致），仅靠 cx=width/2 的布局天然居中。
-    // 之前用 autoFit view 会把小簇（2-3 个节点）放大到铺满画布 → 图谱「巨大无比」。
   }
 
   graph = new Graph(opts)
@@ -1445,7 +1323,6 @@ function initRelationsGraph() {
   graph.render()
 
   const centerId = focus.id
-  // 悬停：只点亮当前指向的岗位本身，不再联动中心/根节点
   function setActive(id: string, on: boolean) {
     if (!graph) return
     const targets = new Set<string>([id])
@@ -1467,7 +1344,6 @@ function initRelationsGraph() {
     setActive(id, false)
     relationsHighlight.value = null
   })
-  // 拖拽画布期间抑制悬停高亮；拖拽开始清掉残留高亮，结束后恢复
   graph.on('dragstart', () => {
     dragging = true
     const cur = relationsHighlight.value
@@ -1476,7 +1352,6 @@ function initRelationsGraph() {
   })
   graph.on('dragend', () => { dragging = false })
 
-  // 点击邻居岗位 → 下钻到它的换岗分析；点击空白只取消高亮，不返回（返回由顶部醒目按钮承担）
   graph.on('node:click', (evt: any) => {
     const id = evt.target?.id
     if (!id) return
@@ -1516,7 +1391,6 @@ onUnmounted(() => {
   padding: 28px 24px 40px;
 }
 
-/* ===== Hero ===== */
 .page-hero { margin-bottom: 20px; }
 
 .hero-paper {
@@ -1552,7 +1426,6 @@ onUnmounted(() => {
   margin: 10px 0 0;
 }
 
-/* ===== Toolbar ===== */
 .graph-toolbar {
   display: flex;
   justify-content: space-between;
@@ -1607,7 +1480,6 @@ onUnmounted(() => {
 
 .toolbar-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
-/* 通用筛选 chips（技术栈 / 级别） */
 .chip-selector {
   display: flex; gap: 3px; border: 1px solid rgba(87, 64, 36, 0.42); padding: 3px;
   background: rgba(252, 247, 235, 0.9); flex-wrap: wrap;
@@ -1631,7 +1503,6 @@ onUnmounted(() => {
 .tool-btn:hover { background: rgba(87, 64, 36, 0.08); color: #3b2412; border-color: rgba(87, 64, 36, 0.42); }
 .tool-btn-icon { font-size: 14px; }
 
-/* ===== 聚焦指示 ===== */
 .focus-crumb {
   font-family: 'SimSun', 'Songti SC', serif;
   font-size: 12px; color: rgba(87, 64, 36, 0.8);
@@ -1660,7 +1531,6 @@ onUnmounted(() => {
   background: rgba(252, 247, 235, 0.85);
 }
 
-/* ===== 主体两栏 ===== */
 .graph-main {
   display: flex;
   gap: 16px;
@@ -1696,7 +1566,6 @@ onUnmounted(() => {
 }
 .graph-center > * { position: relative; z-index: 1; }
 
-/* 画布聚焦上下文条：墨色底 + 奶油返回按钮，与奶油画布形成强对比，一眼锁定「当前聚焦状态」 */
 .canvas-focus-bar {
   display: flex;
   align-items: center;
@@ -1738,7 +1607,6 @@ onUnmounted(() => {
 
 .graph-canvas { width: 100%; height: 560px; }
 
-/* ===== 全景分组岗位卡片 ===== */
 .all-stacks {
   display: flex; flex-direction: column; gap: 18px;
   padding: 20px 22px; min-height: 560px;
@@ -1814,7 +1682,6 @@ onUnmounted(() => {
   color: #6f5438; font-family: 'SimSun', 'Songti SC', serif; font-size: 13px;
 }
 
-/* 右栏 */
 .graph-aside {
   width: 300px;
   flex-shrink: 0;
@@ -1900,7 +1767,6 @@ onUnmounted(() => {
 }
 .aside-chip:hover { background: #3b2412; color: #fbf3e2; border-color: #2a1a0e; }
 
-/* 趋势徽标 */
 .aside-trend {
   font-size: 10px; padding: 1px 6px; border: 1px solid;
   font-family: 'Georgia', serif; letter-spacing: 0.5px; font-weight: 700;
@@ -1910,7 +1776,6 @@ onUnmounted(() => {
 .aside-trend.stable { color: #64748b; border-color: rgba(100, 116, 139, 0.4); background: rgba(100, 116, 139, 0.06); }
 .aside-trend.mini { padding: 0 4px; font-size: 11px; }
 
-/* 技能介绍：用途说明 + 元信息 chips */
 .aside-skill-desc {
   font-size: 12px; line-height: 1.7; color: #3b2412; margin: 0;
 }
@@ -1923,7 +1788,6 @@ onUnmounted(() => {
 .skill-meta-chip.pri-important { color: #b45309; border-color: rgba(180, 83, 9, 0.4); background: rgba(180, 83, 9, 0.08); }
 .skill-meta-chip.pri-bonus { color: #6f5438; border-color: rgba(138, 117, 96, 0.4); background: rgba(138, 117, 96, 0.08); }
 
-/* 转岗分析 */
 .pivot-block {
   padding: 10px 12px; margin-bottom: 8px;
   border: 1px solid rgba(87, 64, 36, 0.4);
@@ -1933,7 +1797,6 @@ onUnmounted(() => {
 .pivot-block:last-child { margin-bottom: 0; }
 .pivot-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 6px; }
 .pivot-name { font-size: 13px; font-weight: 600; color: #2a1a0e; }
-/* 晋升方向「来源 → 目标」：来源弱化灰、目标加粗墨、箭头橙，一眼看清从什么到什么 */
 .pc-from { color: rgba(90, 61, 40, 0.85); font-weight: 500; }
 .pc-arrow { margin: 0 5px; color: #c2410c; font-weight: 700; font-family: Georgia, serif; }
 .pc-to { color: #2a1a0e; font-weight: 700; }
@@ -1946,26 +1809,20 @@ onUnmounted(() => {
 }
 .pivot-diff.empty { color: rgba(87, 64, 36, 0.8); }
 
-/* ===== 关系图谱（换岗优先）专用 ===== */
 .aside-title-aux { font-size: 13px; color: #6b5a48; }
-/* 换岗技能行：✅已具备（绿）/ ➕所差（琥珀） */
 .skill-line { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 5px; }
 .skill-line-label { font-size: 10px; letter-spacing: 0.3px; margin-right: 2px; white-space: nowrap; }
 .skill-line-label.have { color: #2f6b46; }
 .skill-line-label.gap { color: #b45309; }
 .diff-chip.have { color: #2f6b46; border-color: rgba(47, 107, 70, 0.32); background: rgba(47, 107, 70, 0.06); }
 .diff-chip.gap { color: #b45309; border-color: rgba(180, 83, 9, 0.3); background: rgba(180, 83, 9, 0.05); }
-/* 重合度徽章 */
 .pivot-rel.match { color: #2f6b46; border-color: rgba(47, 107, 70, 0.35); background: rgba(47, 107, 70, 0.07); font-weight: 600; }
-/* 换岗目标块：悬停画布节点时点亮 */
 .pivot-block.transfer-block { transition: border-color 0.15s, box-shadow 0.15s; }
 .pivot-block.transfer-block.hl {
   border-color: #c2410c;
   box-shadow: 0 0 0 2px rgba(194, 65, 12, 0.28), 0 2px 6px rgba(64, 45, 20, 0.08);
 }
-/* 晋升辅助块：弱化 */
 .pivot-block.aux { background: rgba(252, 247, 235, 0.55); border-color: rgba(87, 64, 36, 0.28); }
-/* 总览岗位卡：有关系（绿·突出可点）/ 无关系（灰·弱化+虚线，点击仅提示） */
 .chip-rel-count {
   font-size: 10px; color: #2f6b46; border: 1px solid rgba(47, 107, 70, 0.38);
   background: rgba(47, 107, 70, 0.1); padding: 0 5px; border-radius: 2px; margin-left: 6px;
@@ -1976,9 +1833,7 @@ onUnmounted(() => {
   border: 1px dashed rgba(138, 117, 96, 0.5); background: rgba(138, 117, 96, 0.05);
   padding: 0 5px; border-radius: 2px; margin-left: 6px; font-family: Georgia, serif; font-weight: 600;
 }
-/* 有关系的岗位卡：绿色微强调，示意「可点进邻域」 */
 .all-job-chip.has-rel { border-color: rgba(47, 107, 70, 0.42); box-shadow: 0 1px 4px rgba(47, 107, 70, 0.08); }
-/* 无关系的岗位卡：弱化 + 虚线边框 + 灰字，一眼区分 */
 .all-job-chip.no-rel {
   opacity: 0.58; border-style: dashed; border-color: rgba(87, 64, 36, 0.22);
   background: rgba(252, 247, 235, 0.45);
@@ -1991,7 +1846,6 @@ onUnmounted(() => {
 }
 .all-job-chip.no-rel .chip-job-name { color: rgba(90, 61, 40, 0.8); }
 
-/* 关系总览顶部提示图例 */
 .rels-hint {
   display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline;
   font-size: 11.5px; letter-spacing: 0.2px; color: rgba(87, 64, 36, 0.8);
@@ -2004,17 +1858,13 @@ onUnmounted(() => {
 .rels-hint-gap b { color: #2f6b46; }
 .rels-hint-none b { color: #6f5438; }
 
-/* 关系图谱图例：横向换岗（实线·主）/ 垂直晋升（细虚线·辅助） */
 .rel-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #5a3d28; }
 .rel-line {
   display: inline-block; width: 26px; height: 0; flex-shrink: 0; position: relative;
 }
-/* 横向换岗 = 实线深色（主角） */
 .rel-line.horizontal { border-top: 2.2px solid #3b2412; }
-/* 垂直晋升 = 细虚线弱化（辅助） */
 .rel-line.vertical { border-top: 1.2px dashed rgba(138, 117, 96, 0.8); }
 
-/* 晋升阶梯链 */
 .ladder-list { display: flex; flex-direction: column; gap: 8px; }
 .ladder-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .ladder-node {
@@ -2025,7 +1875,6 @@ onUnmounted(() => {
 .ladder-node:hover { color: #c2410c; text-decoration: underline; }
 .ladder-arrow { color: rgba(87, 64, 36, 0.8); margin: 0 2px; font-size: 11px; }
 
-/* 演化右栏 */
 .evo-job-list { display: flex; flex-direction: column; gap: 4px; }
 .evo-job-item {
   text-align: left; padding: 5px 10px; border: 1px solid rgba(87, 64, 36, 0.4);
@@ -2039,7 +1888,6 @@ onUnmounted(() => {
 .aside-legend { display: flex; flex-direction: column; gap: 6px; }
 .aside-legend .aside-trend { font-size: 11px; padding: 2px 8px; align-self: flex-start; }
 
-/* ===== 演化视图（中栏） ===== */
 .evolution-view { padding: 20px 24px; min-height: 560px; }
 
 .market-overview { margin-bottom: 24px; }
@@ -2078,7 +1926,6 @@ onUnmounted(() => {
 .market-tag.up { border-color: rgba(245, 158, 11, 0.2); background: rgba(245, 158, 11, 0.06); color: #d97706; }
 .market-tag.down { border-color: rgba(148, 163, 184, 0.2); background: rgba(148, 163, 184, 0.04); color: #64748b; }
 
-/* 按岗位时间线 */
 .evo-detail { margin-top: 8px; }
 .evo-detail-title {
   font-family: 'SimSun', 'Songti SC', serif; font-size: 16px; font-weight: 700;
@@ -2113,7 +1960,6 @@ onUnmounted(() => {
 .evo-skill-tag.up { border: 1px solid rgba(245, 158, 11, 0.2); background: rgba(245, 158, 11, 0.06); color: #d97706; }
 .evo-skill-tag.down { border: 1px solid rgba(148, 163, 184, 0.2); background: rgba(148, 163, 184, 0.04); color: #64748b; }
 
-/* 演化 meta（更新说明 + 数据源） */
 .evo-meta {
   display: flex; flex-direction: column; gap: 4px;
   margin-top: 12px; padding-top: 10px;
@@ -2132,7 +1978,6 @@ onUnmounted(() => {
   font-size: 13px; color: #6f5438;
 }
 
-/* ===== 图例 ===== */
 .graph-legend {
   position: absolute; bottom: 14px; left: 14px;
   display: flex; gap: 14px; padding: 8px 14px;
@@ -2147,7 +1992,6 @@ onUnmounted(() => {
 .legend-group-label { font-size: 10px; color: #6f5438; margin-right: 2px; }
 .legend-sep { width: 1px; height: 18px; background: rgba(87, 64, 36, 0.28); }
 .legend-item { display: flex; align-items: center; gap: 6px; }
-/* 级别：迷你药丸（底色=级别，奶油文字内嵌）——与真实技能药丸同一造型 */
 .legend-pill {
   display: inline-flex; align-items: center; justify-content: center;
   width: 42px; height: 22px; border-radius: 11px; color: #fbf3e2;
@@ -2157,14 +2001,12 @@ onUnmounted(() => {
 .legend-pill.junior { background: #2f6b46; }
 .legend-pill.mid { background: #b45309; }
 .legend-pill.senior { background: #7a2a22; }
-/* 趋势：深色迷你胶囊 + 奶油符号（▲/▼/●）——与技能药丸内嵌符号一致 */
 .legend-glyph {
   display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; border-radius: 10px; background: #3b2412; color: #fbf3e2;
   font-size: 11px; line-height: 1; border: 1px solid #2a1a0e;
 }
 
-/* ===== Responsive ===== */
 @media (max-width: 900px) {
   .graph-toolbar { flex-direction: column; gap: 10px; align-items: flex-start; }
   .view-toggle button { padding: 5px 10px; font-size: 12px; }
