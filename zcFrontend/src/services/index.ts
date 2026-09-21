@@ -1,8 +1,4 @@
-// ============================================================
-// 统一数据访问层（services）
-// 纯后端：所有数据类接口直接请求后端 /api/v1，失败即抛错，
-// 不再内置 Mock 降级。视图层依赖签名不变。
-// ============================================================
+// 统一数据访问层：所有数据类接口直接请求后端 /api/v1，失败即抛错
 import type {
   JobItem,
   GraphNode,
@@ -43,7 +39,7 @@ export interface DiscoveryLogItem {
   description: string
 }
 
-/** 岗位详情聚合（对齐后端 GET /jobs/:id 响应，路由定义见 backend/app/server.py） */
+/** 岗位详情聚合（GET /jobs/:id） */
 export interface JobDetailData {
   job: JobItem
   intro: JobIntro | null
@@ -57,7 +53,7 @@ export interface AuthResponse {
   user: UserInfo
 }
 
-/** 管理员数据刷新状态（对齐后端 GET /admin/refresh/status） */
+/** 管理员数据刷新状态 */
 export interface RefreshStatus {
   running: boolean
   stage: string
@@ -73,7 +69,7 @@ export interface RefreshStatus {
   } | null
 }
 
-/** 岗位画像（详情页富文本，GET /jobs/:id/profile）：快照预生成 */
+/** 岗位画像（详情页富文本） */
 export interface JobProfileScenario {
   name: string
   desc: string
@@ -125,7 +121,7 @@ export const services = {
     return http<JobItem[]>('/jobs/hot')
   },
 
-  /** 岗位介绍页精选：最热门 30 条（含 5 新兴，GET /jobs/featured） */
+  /** 岗位介绍页精选：最热门 30 条（含 5 新兴） */
   getFeaturedJobs(): Promise<JobItem[]> {
     return http<JobItem[]>('/jobs/featured')
   },
@@ -160,7 +156,7 @@ export const services = {
     return doParseResumeText(text)
   },
 
-  /** 人岗匹配分析（POST /matching/analyze：后端规则算分 + LLM 建议，生成后后端持久化） */
+  /** 人岗匹配分析（规则算分 + LLM 建议） */
   analyzeMatching(job: JobItem, user: UserInfo): Promise<MatchReport> {
     return httpPost<MatchReport>('/matching/analyze', { jobId: job.id, user })
   },
@@ -175,7 +171,7 @@ export const services = {
     return httpDelete<{ ok: boolean }>('/matching/report')
   },
 
-  /** 个人能力画像（POST /profile/analyze：后端 LLM 生成，未配 Key / 调用失败即报错，生成后后端持久化） */
+  /** 个人能力画像（后端 LLM 生成，失败即报错） */
   analyzeAbilityProfile(): Promise<AbilityProfile> {
     return httpPost<AbilityProfile>('/profile/analyze', {})
   },
@@ -215,7 +211,7 @@ export const services = {
     return httpPost<{ ok: boolean }>('/auth/change-password', { oldPassword, newPassword })
   },
 
-  /** 岗位画像（GET /jobs/:id/profile：快照预生成，缺画像返回 404） */
+  /** 岗位画像（快照预生成，缺画像返回 404） */
   async getJobProfile(jobId: string): Promise<JobProfile | null> {
     const d = await http<JobProfile>(`/jobs/${jobId}/profile`)
     return d?.duties?.length ? d : null
@@ -236,7 +232,7 @@ export const services = {
     return http<ApiKeyConfig>('/apikey')
   },
 
-  /** 保存 API Key（PUT /apikey，后端实测校验，失败抛中文错误）：返回体附带两家的最新状态（非全键） */
+  /** 保存 API Key（后端校验，失败抛错）：返回体附带两家最新状态 */
   saveApiKey(
     provider: 'deepseek' | 'dashscope',
     apiKey: string,

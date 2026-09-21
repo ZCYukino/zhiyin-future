@@ -4,18 +4,14 @@ import type { AbilityProfile, JobItem, MatchReport, UserInfo } from '@/models'
 import { services } from '@/services'
 
 /**
- * 个人能力画像 + 人岗匹配报告 的统一状态：
- * 生成过程较长（后端 LLM），把 loading 状态与结果提升到 Pinia 单例，
- * 使得用户在生成中途切换到其它页面再回来时，等待界面与结果都不会丢失。
+ * 画像与匹配报告的统一状态：生成过程较长，提升到 Pinia 单例，切页不丢失。
  */
 export const useAnalysisStore = defineStore('analysis', () => {
-  // ===== 个人能力画像 =====
   const abilityProfile = ref<AbilityProfile | null>(null)
   const profileLoading = ref(false)
   const profileError = ref('')
   const profileLoaded = ref(false)
 
-  // ===== 人岗匹配报告 =====
   const matchReport = ref<MatchReport | null>(null)
   const matchJobId = ref<string | null>(null)
   const matchingLoading = ref(false)
@@ -85,7 +81,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
       matchReport.value = await services.analyzeMatching(job, user)
     } catch (err: any) {
       matchingError.value = err?.message || '匹配分析失败，请稍后重试'
-      // 重新分析失败时清空旧报告与目标岗位，避免 hasReport 按新 jobId 匹配到旧岗位的报告内容
+      // 失败时清空旧报告，避免 hasReport 匹配到旧内容
       matchReport.value = null
       matchJobId.value = null
     } finally {
@@ -106,7 +102,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     }
   }
 
-  /** 账号切换（登录/注册/登出）时清空全部本地状态，避免 A 用户的报告/画像残留给 B 用户。 */
+  /** 账号切换时清空本地状态，避免残留给下一个用户 */
   function reset(): void {
     abilityProfile.value = null
     profileLoading.value = false
