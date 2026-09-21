@@ -1,7 +1,6 @@
 <template>
   <div class="matching-page">
     <div class="matching-content">
-      <!-- 标题 -->
       <section class="page-hero">
         <div class="hero-paper">
           <h1 class="hero-title">人岗匹配分析</h1>
@@ -9,9 +8,7 @@
         </div>
       </section>
 
-      <!-- 操作区域 -->
       <div class="matching-layout">
-        <!-- 左侧：选择岗位 + 上传简历 -->
         <div class="matching-sidebar" :class="{ 'sidebar-hidden': !cardVisable }">
           <div class="paper-card">
             <div class="card-inner">
@@ -40,7 +37,6 @@
               <div class="card-divider"></div>
 
               <div class="resume-upload-area">
-                <!-- 双模式：文件 / 粘贴 -->
                 <div class="upload-tabs">
                   <button :class="['tab-btn', uploadMode === 'file' && 'active']" @click="uploadMode = 'file'">上传文件</button>
                   <button :class="['tab-btn', uploadMode === 'text' && 'active']" @click="uploadMode = 'text'">粘贴文本</button>
@@ -80,7 +76,6 @@
           </div>
         </div>
 
-        <!-- 右侧：分析报告 -->
         <div class="matching-main">
           <div class="paper-card report-card">
             <div class="card-inner">
@@ -97,14 +92,12 @@
               </div>
               <div class="card-divider"></div>
 
-              <!-- 分析中：加载提示，避免长时间干等 -->
               <div v-if="analyzing" class="analyzing-panel">
                 <div class="analyzing-spinner"></div>
                 <p class="analyzing-title">正在生成匹配报告</p>
                 <p class="analyzing-desc">AI 正逐项对照技能矩阵，通常约需 1 分钟，请稍候…</p>
               </div>
 
-              <!-- 无报告时的引导 -->
               <div v-else-if="!hasReport" class="report-empty">
                 <div class="empty-icon-doc">
                   <div class="doc-lines">
@@ -118,9 +111,7 @@
                 </button>
               </div>
 
-              <!-- 报告内容：5 段纵向流 -->
               <div v-else class="report-body">
-                <!-- §1 结论横幅 — 醒目总分 -->
                 <div class="verdict-hero" :class="`hero-${report.verdict}`">
                   <div class="hero-stamp">人岗匹配</div>
                   <div class="hero-score-row">
@@ -142,7 +133,6 @@
                   <div v-if="report.oneLineSummary" class="hero-summary">{{ report.oneLineSummary }}</div>
                 </div>
 
-                <!-- §2 技能覆盖矩阵 -->
                 <div class="report-section">
                   <div class="section-title">
                     <span class="section-line"></span>
@@ -195,7 +185,6 @@
                   </div>
                 </div>
 
-                <!-- §3 硬门槛核查（岗位没给学历/经验要求时整节省略，不留空壳） -->
                 <div class="report-section" v-if="report?.requirements?.length">
                   <div class="section-title">
                     <span class="section-line"></span>
@@ -213,7 +202,6 @@
                   </div>
                 </div>
 
-                <!-- §4 差距优先级标注 -->
                 <div class="report-section">
                   <div class="section-title">
                     <span class="section-line"></span>
@@ -239,7 +227,6 @@
                   </div>
                 </div>
 
-                <!-- §5 学习路径规划 -->
                 <div class="report-section">
                   <div class="section-title">
                     <span class="section-line"></span>
@@ -264,8 +251,7 @@
                       </div>
                     </div>
                   </div>
-                  <!-- 报告里的 llmStatus 是生成时冻结的快照，用户之后可能已配好 Key：
-                       这里实时回读当前账号的 Key 状态，再决定是引导配置还是引导重新分析。 -->
+                  <!-- llmStatus 是生成时的快照，这里实时回读 Key 状态 -->
                   <div v-else-if="report.llmStatus === 'no_api_key'" class="path-empty">
                     <template v-if="keyConfigured">
                       已配置 DeepSeek API Key，请点击「返回修改」后重新分析以生成学习路径。
@@ -318,8 +304,7 @@ const selectedJobId = ref('')
 const displayScore = ref(0)
 let scoreTimer: ReturnType<typeof setInterval> | null = null
 
-// 报告状态统一由 analysis store 持有（跨页面切换等待态/结果不丢失）。
-// editing：用户「返回修改 / 改选岗位」时临时隐藏已存报告，回到选择界面。
+// editing 时临时隐藏已存报告，回到选择界面
 const editing = ref(false)
 const analyzing = computed(() => analysisStore.matchingLoading)
 const report = computed(() => analysisStore.matchReport)
@@ -331,16 +316,14 @@ const resumeUploaded = ref(false)
 const resumeFileName = ref('')
 const parseError = ref('')
 const fileInput = ref<HTMLInputElement>()
-// 已选文件暂存：上传只选文件，「开始分析」时才解析
+// 上传只选文件，「开始分析」时才解析
 const pendingFile = ref<File | null>(null)
 
 const selectedJob = computed(() => {
   return allJobs.value.find(j => j.id === selectedJobId.value) || null
 })
 
-// ===== §5 学习路径空态：报告里的 llmStatus 是生成时冻结的快照 =====
-// 用户可能在生成之后才配好 Key（报告不会自动重算），因此空态落在「未配置 Key」分支时，
-// 必须实时回读一次当前账号的 Key 状态，区分「已配置（需重新分析）」「确实未配置」「读取失败」。
+// 报告的 llmStatus 是生成时快照，空态需实时回读 Key 状态
 const { status: keyStatus, loadFailed: keyLoadFailed, loaded: keyLoaded, load: loadKeyStatus } = useApiKeyStatus('deepseek')
 const keyConfigured = computed(() => keyStatus.value?.configured === true)
 const isAdmin = computed(() => userStore.userInfo?.role === 'admin')
@@ -353,10 +336,8 @@ watch(
   { immediate: true },
 )
 
-/** 重新分析：Key 已配好但报告仍是旧快照时，重跑一次即可生成学习路径（复用 runAnalysis） */
 async function rerunAnalysis() {
   if (analyzing.value) return
-  // 缺少重跑前提（未选岗位 / 未上传简历）时回到修改界面，避免空转一次警告
   if (!selectedJobId.value || !resumeUploaded.value || !selectedJob.value) {
     backToEdit()
     return
@@ -378,8 +359,7 @@ function triggerUpload() {
   fileInput.value?.click()
 }
 
-/** 解析结果写入候选人画像（技能 / 学历 / 简历原文）；由「开始分析」时调用 */
-/** 写入候选人画像；返回是否成功——调用方必须据此决定要不要继续分析 */
+/** 写入候选人画像，返回是否成功 */
 async function applyParseResult(result: ResumeParseResult): Promise<boolean> {
   const cur = userStore.userInfo
   const ok = await userStore.updateUserInfo({
@@ -398,13 +378,11 @@ async function applyParseResult(result: ResumeParseResult): Promise<boolean> {
     ElMessage.error('简历保存失败，请检查后端是否已启动')
     return false
   }
-  // 新简历使旧匹配报告 / 能力画像失效（本地 + 后端各清一份）
   await analysisStore.clearMatchReport()
   await analysisStore.clearAbilityProfile()
   return true
 }
 
-/** 上传简历：仅记录文件待解析，真正解析在「开始分析」时执行 */
 function handleFileChange(e: Event) {
   const input = e.target as HTMLInputElement
   if (input.files && input.files[0]) {
@@ -416,7 +394,6 @@ function handleFileChange(e: Event) {
   }
 }
 
-/** 粘贴文本：仅记录文本待解析，真正解析在「开始分析」时执行 */
 function parseTextInput() {
   const text = pasteText.value.trim()
   if (!text) {
@@ -434,7 +411,6 @@ function onJobChange() {
   displayScore.value = 0
 }
 
-/** 返回修改：回到选择岗位 / 上传简历界面，用户可重新选择后再分析 */
 function backToEdit() {
   editing.value = true
   cardVisable.value = true
@@ -461,7 +437,6 @@ async function runAnalysis() {
     return
   }
 
-  // 延迟解析：上传/粘贴只选简历，「开始分析」时才解析并写入画像
   if (pendingFile.value || (uploadMode.value === 'text' && pasteText.value.trim())) {
     let result: ResumeParseResult
     try {
@@ -473,18 +448,15 @@ async function runAnalysis() {
       ElMessage.error(parseError.value)
       return
     }
-    // 保存失败必须中止：后端库里还是旧简历，继续分析会拿内存里的新技能出报告，
-    // 与用户中心 / 能力画像（读库）对不上
+    // 保存失败必须中止，否则库里的旧简历与内存里的新技能对不上
     if (!(await applyParseResult(result))) return
     user = userStore.userInfo ?? user
     pendingFile.value = null
   }
 
-  // 触发左侧栏收缩动画 + 进入加载态
   cardVisable.value = false
   editing.value = false
 
-  // 由 analysis store 计算匹配报告（后端持久化一份、覆盖旧报告；跨页面切换等待态不丢失）
   await analysisStore.generateMatchReport(selectedJob.value, user)
   if (analysisStore.matchingError) {
     cardVisable.value = true
@@ -497,7 +469,6 @@ async function runAnalysis() {
     return
   }
 
-  // 分数数字滚动动画
   if (scoreTimer) clearInterval(scoreTimer)
   const target = r.score
   let current = 0
@@ -514,9 +485,7 @@ async function runAnalysis() {
 }
 
 
-// PDF 导出：构建「打印专用文档」而非截图屏幕上的报告 DOM（暖纸商务风）。
-// 流程：用 report 数据拼一份 A4 打印调校的文档 HTML（品牌抬头 + 编号章节 + 打印样式），
-// 渲染到隐藏容器 → html2canvas 栅格化完整长图 → 逐页合成 A4 画布（内容切片 + 页脚页码）→ jsPDF。
+// PDF 导出：拼打印文档 HTML → html2canvas 长图 → 逐页合成 A4 画布 → jsPDF
 let pdfExporting = false
 async function exportPDF() {
   if (pdfExporting) return
@@ -546,7 +515,6 @@ async function exportPDF() {
   const gaps = r.priorityGaps || { must: 0, important: 0, bonus: 0 }
   const learningPath = r.learningPath || []
 
-  // §1 综合结论：单卡横幅，去掉悬空超宽进度条与死空间
   const section1 = `
     <div class="section">
       <div class="section-head"><span class="sec-num">01</span><span class="sec-title">综合匹配结论</span></div>
@@ -563,7 +531,6 @@ async function exportPDF() {
       </div>
     </div>`
 
-  // §2 技能覆盖矩阵：流式标签（已/部分/未掌握分组横排换行），消灭单列空柜
   const chip = (s: SkillStatus, kind: 'm' | 'p' | 'g') => {
     const glyph = kind === 'm' ? '✓' : kind === 'p' ? '◐' : '✕'
     return `<span class="chip chip-${kind}"><span class="chip-glyph">${glyph}</span><span class="chip-name">${esc(s.name)}</span><span class="chip-pri pri-${s.priority}">${priLabel(s.priority)}</span><span class="chip-level">L${levelNum(s.level)}</span></span>`
@@ -589,7 +556,6 @@ async function exportPDF() {
       </div>
     </div>`
 
-  // §3 硬门槛核查（岗位没给要求时整节省略，不留空壳）
   const section3 = requirements.length
     ? `
     <div class="section">
@@ -607,7 +573,6 @@ async function exportPDF() {
     </div>`
     : ''
 
-  // §4 差距优先级标注
   const gapItem = (label: string, count: number, desc: string, cls: string) => `
     <div class="gap-item ${cls}">
       <span class="gap-badge">${label}</span>
@@ -624,7 +589,6 @@ async function exportPDF() {
       </div>
     </div>`
 
-  // §5 学习路径规划
   const section5 = learningPath.length ? `
     <div class="section">
       <div class="section-head"><span class="sec-num">05</span><span class="sec-title">学习路径规划</span></div>
@@ -660,7 +624,6 @@ async function exportPDF() {
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 .report-doc{width:800px;padding:24px 28px;font-family:'SimSun','Songti SC','STSong','Noto Serif SC',serif;font-size:14px;color:#2a1a0e;background:#faf6ec;line-height:1.6}
-/* —— 页眉抬头带 —— */
 .doc-head{padding-bottom:12px;margin-bottom:18px;border-bottom:2px solid #3b2412}
 .doc-topline{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .doc-brand{font-family:'SimSun','Songti SC',serif;color:#2a1a0e;font-size:18px;font-weight:700;letter-spacing:2px}
@@ -673,12 +636,10 @@ async function exportPDF() {
 .meta-v{color:#2a1a0e}
 .meta-v b{font-family:Georgia,serif;font-size:18px}
 .meta-v .meta-sub{color:#5a3d28;font-size:12px}
-/* —— 章节 —— */
 .section{margin-bottom:20px}
 .section-head{display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-bottom:7px;border-bottom:2px solid rgba(87,64,36,0.28)}
 .sec-num{font-family:Georgia,serif;font-size:24px;font-weight:700;color:rgba(87,64,36,0.30)}
 .sec-title{font-size:16px;font-weight:700;color:#3b2412;letter-spacing:1px}
-/* §1 */
 .verdict{border:1px solid rgba(87,64,36,0.32);background:#fbf3e2;padding:18px 20px;border-radius:2px}
 .verdict-main{display:flex;align-items:center;gap:20px;margin-bottom:10px}
 .verdict-score{font-family:Georgia,serif;font-size:58px;font-weight:700;line-height:1}
@@ -689,7 +650,6 @@ async function exportPDF() {
 .verdict-bar{height:8px;background:rgba(87,64,36,0.12);margin-bottom:10px;overflow:hidden}
 .verdict-bar-fill{height:100%}
 .verdict-summary{font-size:13px;color:#5a3d28;line-height:1.65}
-/* §2 流式标签 */
 .cov-stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .cov-stat{font-size:12px;color:#5a3d28;padding:3px 12px;border:1px solid rgba(87,64,36,0.3);background:#fbf3e2;border-radius:1px}
 .cov-stat i{font-style:normal;font-weight:700}
@@ -716,7 +676,6 @@ async function exportPDF() {
 .chip-g .chip-glyph{color:#b91c1c}
 .pri-must{color:#7a2a22}.pri-important{color:#b45309}.pri-bonus{color:#8a7560}
 .empty{font-size:12px;color:rgba(87,64,36,0.45);padding:4px 0}
-/* §3 硬门槛 */
 .req-list{display:flex;flex-direction:column;gap:8px}
 .req-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid rgba(87,64,36,0.3);font-size:13px}
 .req-pass{background:linear-gradient(90deg,rgba(21,128,61,0.12),rgba(21,128,61,0.04));border-color:rgba(21,128,61,0.4)}
@@ -728,7 +687,6 @@ async function exportPDF() {
 .req-status{font-weight:700;font-family:Georgia,serif;padding:3px 10px;border:1px solid currentColor;letter-spacing:1px}
 .req-pass .req-status{color:#15803d;background:rgba(21,128,61,0.12)}
 .req-fail .req-status{color:#b91c1c;background:rgba(185,28,28,0.12)}
-/* §4 差距 */
 .gap-strip{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
 .gap-item{display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;border:1px solid rgba(87,64,36,0.4);background:#fbf3e2}
 .gap-badge{font-size:11px;font-weight:700;letter-spacing:2px;padding:2px 10px;border:1px solid currentColor;background:rgba(251,243,226,0.7)}
@@ -740,7 +698,6 @@ async function exportPDF() {
 .gap-important .gap-count{color:#b45309}
 .gap-bonus .gap-count{color:#5a3d28}
 .gap-label{font-size:11px;color:#5a3d28;text-align:center}
-/* §5 学习路径 */
 .path-list{display:flex;flex-direction:column;gap:12px}
 .path-stage{border:1px solid rgba(87,64,36,0.4);background:#fbf3e2}
 .path-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px dashed rgba(87,64,36,0.22)}
@@ -791,9 +748,9 @@ async function exportPDF() {
   const printHeightMm = pageHeight - margin * 2
 
   try {
-    // 智能分页：避免章节标题孤悬页尾（栅格化无法用 CSS 分页，故在 DOM 里量算后插入撑高）。
+    // 量算章节高度插撑高，避免标题孤悬页尾
     const scale = 2
-    const domPxPerMm = 800 / printWidthMm          // 800px 容器在 1x DOM 下的 px/mm
+    const domPxPerMm = 800 / printWidthMm          // 800px 容器的 px/mm 换算
     const pageContentDomPx = printHeightMm * domPxPerMm
     const head = container.querySelector('.report-doc > .doc-head') as HTMLElement | null
     let cursor = head ? head.offsetHeight : 0
@@ -825,9 +782,9 @@ async function exportPDF() {
 
     const pageWpx = Math.round(pageWidth * pxPerMm)
     const pageHpx = Math.round(pageHeight * pxPerMm)
-    const footRuleY = pageHpx - Math.round(10 * pxPerMm)      // 内容底端的分隔线
+    const footRuleY = pageHpx - Math.round(10 * pxPerMm)      // 页脚分隔线
     const footTextY = pageHpx - Math.round(6 * pxPerMm)       // 页脚文字基线
-    const footFont = Math.round(2.6 * pxPerMm)                // ≈ 7.4pt
+    const footFont = Math.round(2.6 * pxPerMm)                // ≈7.4pt
     const FOOTER = '职引未来 · CAREER GUIDE'
 
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
@@ -837,7 +794,6 @@ async function exportPDF() {
       const srcY = Math.round(i * printHeightMm * pxPerMm)
       const srcH = Math.min(Math.round(printHeightMm * pxPerMm), contentHeightPx - srcY)
 
-      // 逐页合成 A4 画布：底色 + 内容切片 + 页脚（品牌 + 页码）
       const pageCanvas = document.createElement('canvas')
       pageCanvas.width = pageWpx
       pageCanvas.height = pageHpx
@@ -847,7 +803,6 @@ async function exportPDF() {
       ctx.drawImage(canvas, 0, srcY, canvas.width, srcH,
         margin * pxPerMm, margin * pxPerMm, printWidthMm * pxPerMm, srcH)
 
-      // 页脚分隔细线
       ctx.strokeStyle = 'rgba(87,64,36,0.26)'
       ctx.lineWidth = Math.max(1, Math.round(0.4 * pxPerMm))
       ctx.beginPath()
@@ -855,7 +810,6 @@ async function exportPDF() {
       ctx.lineTo((pageWidth - margin) * pxPerMm, footRuleY)
       ctx.stroke()
 
-      // 页脚文字：左品牌，右页码
       ctx.fillStyle = '#8a7560'
       ctx.font = `${footFont}px Georgia, 'SimSun', serif`
       ctx.textBaseline = 'middle'
@@ -889,9 +843,7 @@ onMounted(async () => {
     allJobs.value = []
   }
 
-  // 拉取上次持久化的匹配报告：有则直接展示，无需重新生成。
-  // 只要目标岗位 id 存在就恢复选择（即使报告仍在生成中），否则生成完成后
-  // 会因 selectedJobId 为空而无法命中 hasReport，报告卡在空态。
+  // 恢复上次的目标岗位与报告
   await analysisStore.loadMatchReport()
   const savedJobId = analysisStore.matchJobId
   if (savedJobId && allJobs.value.some(j => j.id === savedJobId)) {
@@ -931,7 +883,6 @@ onUnmounted(() => {
   padding: 24px 24px 28px;
 }
 
-/* ===== Hero ===== */
 .page-hero {
   flex: 0 0 auto;
   margin-bottom: 20px;
@@ -980,7 +931,6 @@ onUnmounted(() => {
   margin: 12px 0 0;
 }
 
-/* ===== 布局 ===== */
 .matching-layout {
   flex: 1;
   min-height: 0;
@@ -1029,7 +979,6 @@ onUnmounted(() => {
   display: flex;
 }
 
-/* ===== Paper Card ===== */
 .paper-card {
   position: relative;
   background:
@@ -1075,12 +1024,11 @@ onUnmounted(() => {
   margin: 12px 0 16px;
 }
 
-/* ===== 岗位搜索 ===== */
 .job-select {
   width: 100%;
 }
 
-/* EP v2 的 el-select 用 .el-select__wrapper（box-shadow 描边），改成 real border 统一纸感 */
+/* el-select 用 box-shadow 描边，改成 border 统一纸感 */
 .job-select :deep(.el-select__wrapper) {
   background: rgba(255, 253, 243, 0.94) !important;
   border: 1px solid rgba(87, 64, 36, 0.32) !important;
@@ -1155,7 +1103,6 @@ onUnmounted(() => {
   font-family: 'SimSun', 'Songti SC', serif;
 }
 
-/* ===== 简历上传 ===== */
 .resume-upload-area {
   margin-top: 4px;
 }
@@ -1237,7 +1184,6 @@ onUnmounted(() => {
   color: #b91c1c;
 }
 
-/* 上传模式切换 */
 .upload-tabs {
   display: flex;
   gap: 4px;
@@ -1265,7 +1211,6 @@ onUnmounted(() => {
   border-color: #2a1a0e;
 }
 
-/* 粘贴文本 */
 .paste-zone {
   border: 1px solid rgba(87, 64, 36, 0.4);
   background: rgba(252, 247, 235, 0.9);
@@ -1335,7 +1280,6 @@ onUnmounted(() => {
   border-color: rgba(87, 64, 36, 0.42);
 }
 
-/* ===== 报告区域 ===== */
 .report-card {
   flex: 1;
   min-height: 0;
@@ -1392,7 +1336,6 @@ onUnmounted(() => {
   border-color: #2a1a0e;
 }
 
-/* 空态 */
 .analyzing-panel {
   flex: 1;
   min-height: 0;
@@ -1507,7 +1450,6 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-/* ===== 报告内容 ===== */
 .report-body {
   flex: 1;
   min-height: 0;
@@ -1516,7 +1458,6 @@ onUnmounted(() => {
   padding-right: 6px;
 }
 
-/* §1 结论横幅 — 醒目总分 */
 .verdict-hero {
   position: relative;
   padding: 22px 26px 20px;
@@ -1668,7 +1609,6 @@ onUnmounted(() => {
   background: rgba(243, 230, 203, 0.28);
 }
 
-/* verdict 语义边框色 */
 .verdict-hero.hero-strong { border-color: rgba(21, 128, 61, 0.5); }
 .verdict-hero.hero-strong::before { border-color: rgba(21, 128, 61, 0.22); }
 .verdict-hero.hero-partial { border-color: rgba(180, 83, 9, 0.5); }
@@ -1676,7 +1616,6 @@ onUnmounted(() => {
 .verdict-hero.hero-weak { border-color: rgba(185, 28, 28, 0.5); }
 .verdict-hero.hero-weak::before { border-color: rgba(185, 28, 28, 0.22); }
 
-/* §通用段落标题 */
 .report-section {
   margin-bottom: 22px;
 }
@@ -1699,7 +1638,6 @@ onUnmounted(() => {
   background: rgba(87, 64, 36, 0.22);
 }
 
-/* §2 技能覆盖矩阵 */
 .coverage-stats {
   display: flex;
   flex-wrap: wrap;
@@ -1828,7 +1766,6 @@ onUnmounted(() => {
   padding: 4px 0;
 }
 
-/* §3 硬门槛 */
 .req-list {
   display: flex;
   flex-direction: column;
@@ -1904,7 +1841,6 @@ onUnmounted(() => {
   background: rgba(185, 28, 28, 0.12);
 }
 
-/* §4 差距优先级标注 */
 .gap-strip {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -1955,7 +1891,6 @@ onUnmounted(() => {
   text-align: center;
 }
 
-/* §5 学习路径规划 */
 .path-timeline {
   display: flex;
   flex-direction: column;
@@ -2089,7 +2024,6 @@ onUnmounted(() => {
   color: #7a2a22;
 }
 
-/* ===== Responsive ===== */
 @media (max-width: 1000px) {
   .matching-page {
     height: auto;
