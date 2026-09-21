@@ -26,35 +26,29 @@ app = FastAPI(title="岗位能力图谱后端", version="1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    # 前端使用 Authorization: Bearer 鉴权（非 Cookie），故 allow_credentials=False，
-    # 避免 allow_origins=["*"] + allow_credentials=True 的 CORS 冲突。
+    # Bearer 鉴权（非 Cookie），避免 allow_origins=["*"] + credentials 的 CORS 冲突
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 岗位画像（详情页富文本）生成缓存
+# 岗位画像生成缓存
 _profile_cache: dict[str, dict[str, Any]] = {}
 
 
-# 首次启动且无快照时，从内置种子快照载入，保证离线可演示
+# 首次启动且无快照时，从内置种子快照载入
 store.ensure_seed_snapshot()
 
-# 初始化 SQLite 用户表（失败仅告警，不影响图谱类接口）
 try:
     db.init_db()
-    # 内置管理员账号（用户名/密码取自 config，可在 backend/.env 用 ADMIN_USERNAME/ADMIN_PASSWORD 覆盖）
+    # 内置管理员账号，用户名/密码取自 config
     db.ensure_admin(config.ADMIN_USERNAME, config.ADMIN_PASSWORD)
 except Exception as e:  # noqa: BLE001
     print(f"[warn] 用户存储初始化失败，注册/登录不可用：{e}")
 
 def load_knowledge() -> dict[str, Any]:
-    """读取最新快照；ingest/enrich 写入新快照后自动失效并重载，无需重启。
-
-    缓存实现在 store 里（matching 等只读方也走同一条路），这里只保留入口名。
-    ⚠️ 返回的是**共享对象**，调用方一律只读、不得就地修改。
-    """
+    """读取最新快照；写入新快照后自动失效并重载。返回的是共享对象，调用方只读。"""
     return store.load_cached_snapshot()
 
 
@@ -62,9 +56,7 @@ def _with_details(lst: list[dict[str, Any]], k: dict[str, Any]) -> list[dict[str
     """把 AI 生成的技能矩阵/任职要求内嵌进每个岗位对象，前端卡片可直接渲染，避免按 id 撞库。"""
     prog = k.get("jobSkillProgression", {}) or {}
     req = k.get("jobRequirements", {}) or {}
-    # 返回**新 dict**，不要就地改：lst 里的 job 对象属于快照缓存，就地写会让
-    # /jobs/{id} 这类端点在不同请求顺序下返回不同字段（先调 /jobs 再调 /jobs/1，
-    # job 里就多出 progression/requirements）。
+    # 返回新 dict：lst 里的 job 对象属于快照缓存，就地改会污染后续请求
     return [
         {**j, "progression": prog.get(j.get("id")), "requirements": req.get(j.get("id"))}
         for j in lst
@@ -81,7 +73,7 @@ def _build_job_context(job: dict[str, Any], k: dict[str, Any]) -> str:
         f"名称：{job.get('name', '')}",
         f"分类：{_CATEGORY_NAMES.get(job.get('categoryId', ''), '')}",
         f"薪资：{job.get('salaryMin', '')}-{job.get('salaryMax', '')} {job.get('salaryUnit', 'K/月')}",
-        # 无真实数据源的字段为 None，用 `or` 而非 dict 默认值（`.get(k, '') 对显式 None 不生效）
+        # 字段为 None 时用 or，dict 默认值对显式 None 不生效
         f"招聘公司数：{job.get('companyCount') or ''}家",
         f"热度：{job.get('hotScore') or ''}",
         f"技能标签：{'、'.join(job.get('skills', []) or [])}",
@@ -105,7 +97,7 @@ def _build_job_context(job: dict[str, Any], k: dict[str, Any]) -> str:
             lines.append(f"已知场景：{'；'.join(s.get('name', '') for s in scen if isinstance(s, dict))}")
     changes = [c for c in (k.get("capabilityChanges") or []) if c.get("jobId") == jid]
     if changes:
-        # 取 period 最大的一条作为「近期」（快照里多期记录顺序不定，changes[0] 可能是旧周期）
+        # 取 period 最大的一条作为近期
         recent = max(changes, key=lambda c: str(c.get("period", "")))
         parts = []
         if recent.get("addedSkills"):
@@ -191,9 +183,6 @@ def _parse_job_profile(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# ===== 认证 / 匹配请求体 =====
-
-
 class RegisterRequest(BaseModel):
     username: str
     password: str
@@ -239,7 +228,7 @@ class ApiKeyRequest(BaseModel):
     apiKey: str
 
 
-# 允许的 provider 白名单（PUT / DELETE 共用一份，避免两条路校验漂移）
+# PUT / DELETE 共用一份白名单，避免校验漂移
 _PROVIDERS = ("deepseek", "dashscope")
 
 
@@ -277,8 +266,6 @@ def _require_admin(authorization: str | None) -> dict[str, Any]:
     return user
 
 
-# ===== 管理员数据刷新（后台线程） =====
-
 _refresh_state: dict[str, Any] = {
     "running": False,
     "stage": "idle",
@@ -292,12 +279,10 @@ _refresh_lock = threading.Lock()
 
 
 def _rollback_partial_snapshots(previous: set[str]) -> None:
-    """刷新失败时删掉本次新写入的快照，让 load_knowledge 回退到上一版好快照。
+    """刷新失败时删掉本次新写入的快照，回退到上一版好快照。
 
-    ingest 先落「仅采集」快照、enrich 再补 jobProfiles；若 enrich 后失败，最新快照就是
-    没有 jobProfiles 的残缺版 —— 线上 /api/v1/jobs/{id}/profile 会对所有岗位返回 404，
-    岗位描述也悄悄退回原始 JD，即使上一版快照本来是完整的。
-    config.SNAPSHOT_KEEP=2 + store._prune_snapshots 只保留最近 2 版，故上一版仍在盘上。
+    ingest 先落采集快照、enrich 再补 jobProfiles；enrich 失败后最新快照是残缺版。
+    SNAPSHOT_KEEP=2，上一版仍在盘上。
     """
     written = [p for p in store.list_snapshots() if p.name not in previous]
     removed: list[str] = []
@@ -314,14 +299,10 @@ def _rollback_partial_snapshots(previous: set[str]) -> None:
 
 
 def _run_refresh() -> None:
-    """后台线程：跑一遍完整采集 + 富化管道，刷新项目数据。
+    """后台线程：跑一遍完整采集 + 富化管道；running 标志由路由持锁置位。"""
+    from . import enrich, ingest  # 惰性导入，避免循环依赖
 
-    注意：running 标志由路由在持锁状态下置位（check-and-set 必须原子，否则并发请求
-    会同时拿到「已启动」却只跑了一条线程），本函数只负责在 finally 里清位。
-    """
-    from . import enrich, ingest  # 惰性导入，避免 enrich→server 循环依赖
-
-    # 本次运行开始前已存在的快照名：失败时据此判定/回滚本次新写入的残缺快照
+    # 本次运行开始前已存在的快照名，失败时据此回滚
     previous_snapshots = {p.name for p in store.list_snapshots()}
 
     def report(stage: str, pct: int) -> None:
@@ -330,13 +311,13 @@ def _run_refresh() -> None:
             _refresh_state["progress"] = max(0, min(100, int(pct)))
 
     try:
-        # 阶段一：采集 → 清洗 → 抽取 → 组装 → 向量化 → 快照（占 0–85%）
+        # 阶段一：采集→清洗→抽取→组装→向量化→快照（0–85%）
         def ingest_progress(stage: str, pct: int) -> None:
             report(stage, int(pct * 0.85))
 
         k, failed_jobs = ingest.main(use_crawler=True, progress=ingest_progress)
 
-        # 阶段二：岗位画像富化（占 85–100%）
+        # 阶段二：岗位画像富化（85–100%）
         def enrich_progress(stage: str, pct: int) -> None:
             report(stage, 85 + int(pct * 0.15))
 
@@ -354,14 +335,11 @@ def _run_refresh() -> None:
         with _refresh_lock:
             _refresh_state["error"] = str(e)
     finally:
-        # 刷新会重写快照中的岗位画像，清空画像缓存，避免详情页返回刷新前的旧富文本
+        # 刷新重写了画像，清空缓存避免返回旧富文本
         _profile_cache.clear()
         with _refresh_lock:
             _refresh_state["running"] = False
             _refresh_state["finishedAt"] = datetime.now().isoformat(timespec="seconds")
-
-
-# ===== 路由（对齐契约 /api/v1）=====
 
 
 @app.get("/health")
@@ -422,8 +400,6 @@ def job_detail(job_id: str) -> dict[str, Any]:
     k = load_knowledge()
     job = next((j for j in (k.get("jobs", []) or []) if j.get("id") == job_id), None)
     if not job:
-        # 与 /jobs/{id}/profile 一致：资源不存在返回 404，而不是 200+{"job":null}。
-        # 前端 jobDetail.vue 对 404 已有 catch(() => null) 防御，行为不变。
         raise HTTPException(status_code=404, detail="未找到目标岗位")
     graph = k.get("graph", {}) or {}
     job_node = next(
@@ -485,9 +461,6 @@ def discoveries() -> list[dict[str, Any]]:
     return out
 
 
-# ===== 用户认证 =====
-
-
 @app.post("/api/v1/auth/register")
 def auth_register(body: RegisterRequest) -> dict[str, Any]:
     username = body.username.strip()
@@ -496,7 +469,7 @@ def auth_register(body: RegisterRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
     if len(password) < 6:
         raise HTTPException(status_code=400, detail="密码至少 6 位")
-    # 管理员用户名保留（防抢注后被 ensure_admin 提权）；create_user 里也有一道同样的闸
+    # 管理员用户名保留，create_user 里还有一道同样的闸
     if db.is_reserved_username(username):
         raise HTTPException(status_code=400, detail="该用户名为系统保留，不可注册")
     user = db.create_user(username, password)
@@ -545,8 +518,6 @@ def auth_change_password(body: ChangePasswordRequest, authorization: str | None 
     return {"ok": True}
 
 
-# ===== API Key 管理（账号级；dashscope 仅管理员可配） =====
-
 @app.get("/api/v1/apikey")
 def apikey_get(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """当前账号的 Key 状态（只回显脱敏值）；普通用户只见 deepseek，管理员见两者。"""
@@ -590,7 +561,7 @@ def apikey_delete(authorization: str | None = Header(default=None), provider: st
     user = _current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="未登录或登录已过期")
-    # 与 PUT 同一份白名单：未知 provider 必须 400，不能删了个空还能回 {"ok": true}
+    # 与 PUT 同一份白名单
     if provider not in _PROVIDERS:
         raise HTTPException(status_code=400, detail="不支持的 provider")
     if provider == "dashscope" and user.get("role") != "admin":
@@ -599,12 +570,9 @@ def apikey_delete(authorization: str | None = Header(default=None), provider: st
     return {"ok": True}
 
 
-# ===== 个人能力画像（后端 LLM 生成，生成后持久化一份）=====
-
-
 @app.post("/api/v1/profile/analyze")
 def profile_analyze(authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    """基于当前用户资料生成个人能力画像（真实 LLM，无规则降级）。生成后持久化（覆盖旧画像）。"""
+    """基于当前用户资料生成个人能力画像，生成后持久化。"""
     user = _current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="未登录或登录已过期")
@@ -640,18 +608,15 @@ def profile_clear(authorization: str | None = Header(default=None)) -> dict[str,
     return {"ok": True}
 
 
-# ===== 人岗匹配（规则算分 + LLM 建议，生成后持久化一份）=====
-
-
 @app.post("/api/v1/matching/analyze")
 def matching_analyze(body: MatchRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    # 凭据按鉴权 token 的用户解析（零相交）；未登录 → 无凭据 → llmStatus=no_api_key
+    # 凭据按鉴权 token 的用户解析；未登录则 llmStatus=no_api_key
     au = _current_user(authorization)
     credentials = settings.llm_credentials(au)
     report = matching.build_match_report(body.jobId, body.user, credentials=credentials)
     if report is None:
         raise HTTPException(status_code=404, detail="未找到目标岗位")
-    # 仅当请求来自已登录用户时才持久化；不再信任 body.user.id（可伪造，会覆写他人报告）
+    # 仅当已登录才持久化；不信任 body.user.id（可伪造）
     if au is not None:
         try:
             db.save_match_report(int(au["id"]), {"jobId": body.jobId, "report": report})
@@ -685,7 +650,7 @@ def job_profile(job_id: str) -> dict[str, Any]:
     if job_id in _profile_cache:
         return _profile_cache[job_id]
     k = load_knowledge()
-    # 快照含预生成画像（enrich.py 批量产出）→ 直接返回
+    # 快照含预生成画像，直接返回
     profiles = k.get("jobProfiles") or {}
     if job_id in profiles:
         _profile_cache[job_id] = profiles[job_id]
@@ -693,16 +658,11 @@ def job_profile(job_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="该岗位暂无画像")
 
 
-# ===== 管理员数据刷新 =====
-
-
 @app.post("/api/v1/admin/refresh")
 def admin_refresh(authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    """触发一次完整数据刷新（采集 + 富化），在后台线程执行，避免阻塞请求。"""
+    """触发一次完整数据刷新（采集 + 富化），在后台线程执行。"""
     _require_admin(authorization)
-    # 预检必须与后台任务用同一套（系统级）凭据解析：后台跑的是 system_llm_credentials()
-    # + embed_credentials()（都指向 ADMIN_USERNAME 那个账号）。若这里改查「调用者 admin」
-    # 的 Key，多管理员行并存时会出现预检通过、跑了一阵才因 Key 缺失而整轮失败。
+    # 预检与后台任务用同一套（系统级）凭据解析，多管理员并存时才不会中途失败
     missing: list[str] = []
     if not settings.system_llm_credentials().configured:
         missing.append("DeepSeek API Key")
@@ -710,8 +670,7 @@ def admin_refresh(authorization: str | None = Header(default=None)) -> dict[str,
         missing.append("阿里云百炼 API Key")
     if missing:
         raise HTTPException(status_code=400, detail=f"请先在下方配置 {'、'.join(missing)} 后再刷新")
-    # check-and-set 必须在同一把锁内完成：否则并发请求 A/B 都能通过检查，
-    # 而 B 的线程一进 _run_refresh 就因 running 已置位而立即返回，接口却仍回「已启动」。
+    # check-and-set 必须在同一把锁内完成
     with _refresh_lock:
         if _refresh_state["running"]:
             raise HTTPException(status_code=409, detail="数据刷新已在进行中")
@@ -726,7 +685,7 @@ def admin_refresh(authorization: str | None = Header(default=None)) -> dict[str,
         )
     try:
         threading.Thread(target=_run_refresh, daemon=True).start()
-    except Exception:  # noqa: BLE001 线程起不来就别把 running 永久卡在 True
+    except Exception:  # noqa: BLE001 线程起不来就把 running 复位
         with _refresh_lock:
             _refresh_state["running"] = False
         raise
@@ -740,9 +699,7 @@ def admin_refresh_status(authorization: str | None = Header(default=None)) -> di
         return dict(_refresh_state)
 
 
-# ===== 可选：单容器部署时托管前端构建产物 =====
-# 若 backend/dist 存在（多阶段 Docker 构建 COPY 进来），挂载为静态站点。
-# 前端为 hash 路由，html=True 提供 index.html 回退；API 路由已在上方注册，优先匹配。
+# 单容器部署：backend/dist 存在时托管前端构建产物（hash 路由，html=True 回退）
 _dist = config.BACKEND_ROOT / "dist"
 if _dist.is_dir():
     from fastapi.staticfiles import StaticFiles
