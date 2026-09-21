@@ -1,6 +1,5 @@
 <template>
   <div class="home-page">
-    <!-- 浮动职业名背景 -->
     <div class="careers-layer">
       <div v-for="(item, index) in floatingCareers" :key="index" class="career-drift" :style="item.driftStyle">
         <span class="career-word" :style="item.wordStyle">{{ item.name }}</span>
@@ -8,7 +7,6 @@
     </div>
 
     <div class="home-scroll">
-      <!-- ===== 1. 主卡片：轮播图 + TOP5 ===== -->
       <div class="home-card">
         <div class="carousel-col">
           <el-carousel class="home-carousel" height="100%" :interval="4600" arrow="hover">
@@ -164,9 +162,7 @@
         </div>
       </div>
 
-      <!-- ===== 2. 新岗位发现 + 新兴技术栈 ===== -->
       <div class="bottom-row">
-        <!-- 新岗位发现 -->
         <section class="section-card discovery-card">
           <div class="section-head">
             <div class="section-head-left">
@@ -190,7 +186,6 @@
           </div>
         </section>
 
-        <!-- 新兴技术栈 -->
         <section class="section-card tech-stack-card">
           <div class="section-head">
             <div class="section-head-left">
@@ -329,7 +324,7 @@ onMounted(async () => {
     top5Jobs.value = hot.slice(0, 5)
     discoveries.value = logs
   } catch {
-    /* 后端未就绪时保持空态，页面其余部分仍可浏览 */
+    /* 后端未就绪时保持空态 */
   }
 })
 
@@ -345,7 +340,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-/* ===== 浮动背景 ===== */
 .careers-layer { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
 .career-drift { position: absolute; white-space: nowrap; will-change: transform; }
 .career-word {
@@ -363,9 +357,6 @@ onBeforeUnmount(() => {
   padding: 32px 24px 24px;
 }
 
-/* ================================================================
-   1. 主卡片：轮播图 + TOP5
-   ================================================================ */
 .home-card {
   display: flex;
   position: relative;
@@ -393,7 +384,6 @@ onBeforeUnmount(() => {
   pointer-events: none; z-index: 0;
 }
 
-/* 左：轮播 */
 .carousel-col {
   flex: 0 0 57%;
   min-width: 0;
@@ -473,14 +463,12 @@ onBeforeUnmount(() => {
   position: absolute; inset: 0; width: 100%; height: 100%;
   z-index: 2; pointer-events: none;
 }
-/* 分隔 */
 .col-divider {
   width: 1px;
   background: linear-gradient(180deg, transparent 8%, rgba(87,64,36,0.1) 25%, rgba(87,64,36,0.1) 75%, transparent 92%);
   flex-shrink: 0;
 }
 
-/* 右：TOP5 */
 .jobs-col {
   flex: 1 1 0; min-width: 0; padding: 30px 26px 28px;
   display: flex; flex-direction: column;
@@ -559,9 +547,6 @@ onBeforeUnmount(() => {
 .va-arrow { transition: transform 0.2s; font-size: 11px; }
 .view-all:hover .va-arrow { transform: translateX(3px); }
 
-/* ================================================================
-   通用 Section 样式
-   ================================================================ */
 .section-card {
   position: relative;
   display: flex;
@@ -612,9 +597,6 @@ onBeforeUnmount(() => {
   margin-bottom: 16px;
 }
 
-/* ================================================================
-   2. 底部双栏：新岗位发现 + 新兴技术栈
-   ================================================================ */
 .bottom-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -623,7 +605,6 @@ onBeforeUnmount(() => {
   align-items: stretch;
 }
 
-/* 新岗位发现 */
 .discovery-list {
   display: flex; flex-direction: column; gap: 12px;
   flex: 1; justify-content: space-between;
@@ -667,7 +648,6 @@ onBeforeUnmount(() => {
   font-size: 10px; color: rgba(87,64,36,0.5);
 }
 
-/* 新兴技术栈 */
 .tech-grid {
   display: flex;
   flex-direction: column;
@@ -750,7 +730,6 @@ onBeforeUnmount(() => {
   color: #5a3d28;
 }
 
-/* 技术栈介绍弹出框（点击项上方，信纸质感） */
 .tech-pop {
   position: absolute;
   left: 0;
@@ -812,16 +791,12 @@ onBeforeUnmount(() => {
 .tech-pop-enter-active, .tech-pop-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
 .tech-pop-enter-from, .tech-pop-leave-to { opacity: 0; transform: translateY(6px); }
 
-/* Footer */
 .home-footer {
   text-align: center; padding: 28px 0 8px;
   font-family: 'SimSun','Songti SC',serif;
   font-size: 11px; color: rgba(87,64,36,0.3); letter-spacing: 1px;
 }
 
-/* ================================================================
-   Responsive
-   ================================================================ */
 @media (max-width: 780px) {
   .home-card { flex-direction: column; }
   .carousel-col { flex: none; padding: 24px 24px 20px; }

@@ -1,7 +1,6 @@
 <template>
   <div class="admin-page">
     <div class="admin-inner">
-      <!-- 页头 -->
       <header class="admin-head">
         <div class="head-title">
           <span class="head-kicker">ADMIN CONSOLE</span>
@@ -14,7 +13,6 @@
         </div>
       </header>
 
-      <!-- 说明卡 -->
       <section class="paper-card">
         <div class="card-head">
           <span class="card-index">01</span>
@@ -32,7 +30,6 @@
         </div>
       </section>
 
-      <!-- 刷新操作卡 -->
       <section class="paper-card">
         <div class="card-head">
           <span class="card-index">02</span>
@@ -67,7 +64,6 @@
           </span>
         </div>
 
-        <!-- 进度 -->
         <div v-if="status && (status.running || status.progress > 0)" class="progress-panel">
           <div class="progress-head">
             <span class="progress-stage">当前阶段：{{ status.stage || '—' }}</span>
@@ -82,7 +78,6 @@
           <div v-if="status.startedAt" class="progress-meta">开始于 {{ status.startedAt }}</div>
         </div>
 
-        <!-- 结果 -->
         <div v-if="status?.result" class="result-panel">
           <div class="result-item">
             <span class="result-val">{{ status.result.jobCount }}</span>
@@ -106,7 +101,6 @@
           </div>
         </div>
 
-        <!-- 错误 -->
         <el-alert
           v-if="status?.error"
           :title="status.error"
@@ -117,7 +111,6 @@
         />
       </section>
 
-      <!-- API Key 配置 -->
       <section class="paper-card">
         <div class="card-head">
           <span class="card-index">03</span>
@@ -163,19 +156,18 @@ let timer: number | null = null
 
 const dsKeys = useApiKeyStatus('deepseek')
 const dcKeys = useApiKeyStatus('dashscope')
-/** 首次读取未落定时两个 loaded 均为 false：此时既不能断言已配置，也不能断言未配置 */
+/** 读取未落定时不断言已配置/未配置 */
 const keysLoading = computed(() => !dsKeys.loaded.value || !dcKeys.loaded.value)
 const keysLoadFailed = computed(() => dsKeys.loadFailed.value || dcKeys.loadFailed.value)
 const apiKeysReady = computed(() => dsKeys.status.value?.configured === true && dcKeys.status.value?.configured === true)
-/** 只在「读取成功且确实缺 Key」时才置灰：读取失败/读取中都不该冒充「未配置」 */
+/** 只有读取成功且确实缺 Key 才置灰 */
 const keysMissing = computed(() => !keysLoading.value && !keysLoadFailed.value && !apiKeysReady.value)
 
 async function refreshKeys() {
   await Promise.all([dsKeys.load(), dcKeys.load()])
 }
 
-// 与后端 _run_refresh 实际报告的阶段字符串一一对应（backend/app/server.py），
-// 阶段条由 status.stage 实时驱动，真实反映刷新进度，不再是静态说明。
+// 与后端 _run_refresh 报告的阶段字符串一一对应
 const STAGE_STEPS = [
   '初始化',
   '采集原始 JD',
@@ -191,7 +183,7 @@ const STAGE_STEPS = [
 const stageFlow = computed(() => {
   const s = status.value?.stage || ''
   let idx = STAGE_STEPS.indexOf(s)
-  if (idx === -1 && s === '采集完成') idx = STAGE_STEPS.indexOf('岗位画像富化') // 采集完成 = 进入富化阶段
+  if (idx === -1 && s === '采集完成') idx = STAGE_STEPS.indexOf('岗位画像富化')
   return { idx, finished: s === '刷新完成' }
 })
 
@@ -203,22 +195,19 @@ function stepState(i: number): 'done' | 'active' | 'pending' {
   return 'pending'
 }
 
-/** skipKeys=true 用于 2s 轮询：省掉重复的 Key 回读，其余时机必须回读 */
+/** skipKeys=true 用于 2s 轮询，省掉重复的 Key 回读 */
 async function fetchStatus(skipKeys = false) {
   try {
     status.value = await services.getAdminRefreshStatus()
     if (!status.value.running) stopPolling()
-    // 冷加载 / 手动刷新 / 轮询结束都回读 Key 状态。若只在空闲时回读，
-    // 「冷加载时后端已在刷新」的整段期间都拿不到 Key 状态，提示会误报「刷新前请先配置…」。
     if (!skipKeys) await refreshKeys()
   } catch (err: any) {
-    if (err instanceof TypeError) return // 后端未就绪（网络异常），保持静默
+    if (err instanceof TypeError) return
     if (err?.status === 401 || err?.status === 403) {
-      // 登录过期/无权限：停止轮询并提示，避免每 2s 静默失败
       stopPolling()
       ElMessage.warning(err?.message || '登录已过期，请重新登录')
     }
-    /* 其他 HTTP 错误（如瞬时 5xx）保持静默，下一轮轮询自会重试 */
+    /* 其他错误保持静默，下一轮轮询重试 */
   }
 }
 
@@ -235,7 +224,7 @@ function stopPolling() {
 }
 
 async function handleRefresh() {
-  if (starting.value) return // 双击防抖：避免连发两次 POST /admin/refresh
+  if (starting.value) return
   starting.value = true
   try {
     await services.adminRefresh()
@@ -250,7 +239,6 @@ async function handleRefresh() {
 }
 
 onMounted(async () => {
-  // fetchStatus 默认会一并回读 Key 状态（即使后端正在刷新），避免整段刷新期误报未配置
   await fetchStatus()
   if (status.value?.running) startPolling()
 })
@@ -269,7 +257,6 @@ onUnmounted(stopPolling)
   margin: 0 auto;
 }
 
-/* ===== 页头 ===== */
 .admin-head {
   display: flex;
   justify-content: space-between;
@@ -321,7 +308,6 @@ onUnmounted(stopPolling)
   font-family: 'SimSun', 'Songti SC', serif;
 }
 
-/* ===== 纸卡 ===== */
 .paper-card {
   position: relative;
   background: #fbf3e2;
@@ -368,7 +354,6 @@ onUnmounted(stopPolling)
   color: rgba(79, 57, 31, 0.85);
 }
 
-/* 阶段条 */
 .stage-strip {
   display: flex;
   flex-wrap: wrap;
@@ -417,7 +402,6 @@ onUnmounted(stopPolling)
   font-weight: 700;
 }
 
-/* ===== 刷新操作 ===== */
 .refresh-row {
   display: flex;
   align-items: center;
@@ -467,7 +451,6 @@ onUnmounted(stopPolling)
   color: #7a2a22;
 }
 
-/* 进度 */
 .progress-panel {
   margin-top: 22px;
   padding-top: 20px;
@@ -502,7 +485,6 @@ onUnmounted(stopPolling)
   background: linear-gradient(90deg, #5a3d28, #3b2412);
 }
 
-/* 结果 */
 .result-panel {
   display: flex;
   align-items: center;
