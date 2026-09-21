@@ -1,7 +1,6 @@
 <template>
   <div class="user-page">
     <div class="user-content">
-      <!-- 标题 -->
       <section class="page-hero">
         <div class="hero-paper">
           <h1 class="hero-title">用户中心</h1>
@@ -9,9 +8,7 @@
         </div>
       </section>
 
-      <!-- 双列布局 -->
       <div class="user-layout">
-        <!-- 左侧：个人信息 + 简历 -->
         <div class="user-sidebar">
           <div class="paper-card">
             <div class="card-inner">
@@ -83,7 +80,6 @@
           </div>
         </div>
 
-        <!-- 右侧：能力画像 -->
         <div class="user-main">
           <div class="paper-card">
             <div class="card-inner">
@@ -101,7 +97,6 @@
               </div>
 
               <div v-else class="analysis-content">
-                <!-- 生成按钮 -->
                 <div class="profile-actions">
                   <el-button type="primary" :loading="profileLoading" :disabled="resumeParsing || keyMissing" @click="generateProfile">
                     <IconEpMagicStick /> {{ profile ? '重新生成画像' : '生成能力画像' }}
@@ -115,9 +110,7 @@
                 <p v-else-if="keyLoadFailed" class="profile-error">无法获取 Key 状态，请检查后端服务。</p>
                 <p v-else-if="!keyLoaded" class="profile-hint-line">正在读取 Key 状态…</p>
 
-                <!-- 画像结果 -->
                 <template v-if="profile">
-                  <!-- 综合评估 -->
                   <div class="analysis-section">
                     <h4 class="analysis-title">
                       <IconEpDataAnalysis class="ana-icon" /> 综合评估
@@ -136,7 +129,6 @@
                     </div>
                   </div>
 
-                  <!-- 技能达标度 -->
                   <div class="analysis-section">
                     <h4 class="analysis-title">
                       <IconEpHistogram class="ana-icon" /> 技能达标度
@@ -166,7 +158,6 @@
                     </div>
                   </div>
 
-                  <!-- 学历与经验 -->
                   <div class="analysis-section">
                     <h4 class="analysis-title">
                       <IconEpSchool class="ana-icon" /> 学历与经验
@@ -189,7 +180,6 @@
                     </div>
                   </div>
 
-                  <!-- 项目含金量 -->
                   <div class="analysis-section">
                     <h4 class="analysis-title">
                       <IconEpFolderOpened class="ana-icon" /> 项目含金量
@@ -206,7 +196,6 @@
                     </div>
                   </div>
 
-                  <!-- 证书与获奖 -->
                   <div class="analysis-section">
                     <h4 class="analysis-title">
                       <IconEpMedal class="ana-icon" /> 证书与获奖
@@ -228,7 +217,6 @@
                     </div>
                   </div>
 
-                  <!-- 优势 -->
                   <div class="analysis-section">
                     <h4 class="analysis-title">
                       <IconEpTrophy class="ana-icon" /> 优势
@@ -240,7 +228,6 @@
                     </div>
                   </div>
 
-                  <!-- 短板 -->
                   <div class="analysis-section">
                     <h4 class="analysis-title">
                       <IconEpWarningFilled class="ana-icon" /> 短板
@@ -252,7 +239,6 @@
                     </div>
                   </div>
 
-                  <!-- 优先提升建议 -->
                   <div class="analysis-section">
                     <h4 class="analysis-title">
                       <IconEpPromotion class="ana-icon" /> 优先提升建议
@@ -318,15 +304,13 @@ const profileError = computed(() => analysisStore.profileError)
 
 const { status: keyStatus, loadFailed: keyLoadFailed, loaded: keyLoaded, load: fetchKeyStatus } = useApiKeyStatus('deepseek')
 const apiKeyReady = computed(() => keyStatus.value?.configured === true)
-// 首次读取落定前 keyStatus 恒为 null：此时既不能置灰按钮，也不能说「尚未配置」
+// 读取落定前 keyStatus 为 null，不置灰也不提示未配置
 const keyMissing = computed(() => keyLoaded.value && !keyLoadFailed.value && !apiKeyReady.value)
-// 管理员在「数据管理」页配置 Key，普通用户才去「API Key 管理」（路由守卫会把 /apikey 改写为 /admin）
+// 管理员去数据管理页，普通用户去 API Key 管理页
 const keyConfigPath = computed(() => (userStore.userInfo?.role === 'admin' ? '/admin' : '/apikey'))
 const keyConfigLabel = computed(() => (userStore.userInfo?.role === 'admin' ? '前往「数据管理」配置' : '前往「API Key 管理」配置'))
 
-// 生成失败若因未配 Key（后端改写为含「API Key」的提示），重新回读一次 Key 状态。
-// 不直接置空 status：置空等于凭空断言「未配置」，若实为偶发调用失败会误导用户；
-// 回读拿到 configured=false 才会走 keyMissing 分支（置灰 + 引导配置），拿到 true 则保持可用。
+// 失败提示含 API Key 时重新回读状态，不直接置空
 watch(() => analysisStore.profileError, (msg) => {
   if (msg && msg.includes('API Key')) fetchKeyStatus()
 })
@@ -337,8 +321,7 @@ const ringStyle = computed(() => {
 })
 
 async function generateProfile() {
-  // 画像全部以简历为主：直接基于已落库的简历解析结果生成，
-  // 不再同步左侧个人信息表单（否则空表单会覆盖简历解析出的学历等信息）。
+  // 基于已落库的简历解析结果生成，不读左侧表单
   await analysisStore.generateAbilityProfile()
 }
 
@@ -346,11 +329,10 @@ function triggerUpload() {
   fileInput.value?.click()
 }
 
-/** 上传简历：立即解析并落库，新简历即刻生效（无需再点「保存信息」） */
 async function handleFileChange(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files && input.files[0]
-  input.value = '' // 清空以允许重选同一文件
+  input.value = ''
   if (!file) return
   resumeParsing.value = true
   resumeFileName.value = file.name
@@ -360,7 +342,6 @@ async function handleFileChange(e: Event) {
     await applyParseResult(result)
   } catch (err: any) {
     ElMessage.error(err?.message || '简历解析失败，请重新上传')
-    // 回退乐观状态：本有旧简历则保留其「已上传」态，否则回到未上传空态
     if (userStore.userInfo?.hasResume) {
       resumeFileName.value = userStore.userInfo.resumeName || '已上传简历'
       resumeUploaded.value = true
@@ -373,11 +354,10 @@ async function handleFileChange(e: Event) {
   }
 }
 
-/** 应用解析结果：写入候选人画像（技能 / 学历 / 简历原文），上传时立即调用 */
 async function applyParseResult(result: ResumeParseResult) {
   resumeUploaded.value = true
   const cur = userStore.userInfo
-  // 解析出的学历回填到表单，避免随后 saveProfile 的 {...form} 用空学历覆盖
+  // 学历回填表单，避免保存时被空值覆盖
   const edu = form.education || result.education || cur?.education || ''
   form.education = edu
   if (result.skills.length === 0) {
@@ -396,17 +376,14 @@ async function applyParseResult(result: ResumeParseResult) {
     skillEvidence: JSON.stringify(skillEvidenceMap(result.skills)),
   })
   if (!ok) {
-    // 抛错交给 handleFileChange 统一回退乐观状态，避免「已上传」残留假成功
     throw new Error('简历保存失败，请检查后端是否已启动')
   }
-  // 新简历保存**成功**后才使旧画像 / 旧匹配报告失效：若保存失败，旧结果仍然有效，
-  // 提前清空会让一次失败的保存白白毁掉还能用的报告
+  // 保存成功后才清旧画像/旧报告，失败时保留旧结果
   analysisStore.clearAbilityProfile()
   analysisStore.clearMatchReport()
   ElMessage.success('简历已解析，可直接生成能力画像')
 }
 
-/** 从后端已持久化的简历恢复上传状态（刷新/重新登录场景） */
 function restoreResume() {
   const u = userStore.userInfo
   if (!u?.hasResume || resumeRestored) return
@@ -418,7 +395,6 @@ function restoreResume() {
 async function saveProfile() {
   saving.value = true
   try {
-    // 简历已在上传时自动解析落库，这里只保存个人信息表单
     const ok = await userStore.updateUserInfo({ ...form })
     if (!ok) {
       ElMessage.error('保存失败，请检查后端是否已启动')
@@ -430,7 +406,6 @@ async function saveProfile() {
   }
 }
 
-/** 登录态异步加载完成后回填表单（处理页面刷新场景） */
 watch(() => userStore.userInfo, (u) => {
   if (!u) return
   if (!form.username) form.username = u.username || ''
@@ -445,9 +420,7 @@ watch(() => userStore.userInfo, (u) => {
 
 onMounted(() => {
   restoreResume()
-  // 拉取上次持久化的能力画像，再次进入无需重新生成
   analysisStore.loadAbilityProfile()
-  // 未配 Key 时置灰生成按钮并给出引导
   fetchKeyStatus()
 })
 </script>
@@ -463,7 +436,6 @@ onMounted(() => {
   padding: 28px 24px 40px;
 }
 
-/* ===== Hero ===== */
 .page-hero { margin-bottom: 24px; }
 
 .hero-paper {
@@ -517,7 +489,6 @@ onMounted(() => {
   margin: 12px 0 0;
 }
 
-/* ===== 双列布局 ===== */
 .user-layout {
   display: grid;
   grid-template-columns: 400px 1fr;
@@ -525,7 +496,6 @@ onMounted(() => {
   align-items: start;
 }
 
-/* ===== Paper Card ===== */
 .paper-card {
   background:
     radial-gradient(ellipse 80px 60px at 0% 0%, rgba(120, 80, 30, 0.14), transparent 70%),
@@ -568,7 +538,6 @@ onMounted(() => {
   margin: 12px 0 16px;
 }
 
-/* ===== 卡片头部（眉标 + 标题） ===== */
 .card-head { margin-bottom: 4px; }
 
 .card-eyebrow {
@@ -581,7 +550,6 @@ onMounted(() => {
   margin-bottom: 4px;
 }
 
-/* ===== Form（档案表格：2 列网格，用户名全宽只读带） ===== */
 .user-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -605,7 +573,7 @@ onMounted(() => {
   box-shadow: inset 0 1px 2px rgba(87, 64, 36, 0.05), inset 0 0 0 1px rgba(255, 252, 240, 0.5) !important;
 }
 
-/* 学历选择框与文本输入框视觉统一（EP v2 默认 box-shadow 描边，改成 real border） */
+/* el-select 与输入框统一为 border 描边 */
 .user-form :deep(.el-select__wrapper) {
   background: rgba(255, 253, 243, 0.94) !important;
   border: 1px solid rgba(87, 64, 36, 0.32) !important;
@@ -613,7 +581,6 @@ onMounted(() => {
   border-radius: 3px !important;
 }
 
-/* 占位/提示文字比背景更深，保证可读 */
 .user-form :deep(.el-input__inner::placeholder),
 .user-form :deep(.el-select__placeholder) {
   color: rgba(87, 64, 36, 0.62) !important;
@@ -629,7 +596,6 @@ onMounted(() => {
   border-color: rgba(87, 64, 36, 0.62) !important;
 }
 
-/* 用户名只读带：弱化为一枚「账号」纸片 */
 .user-form .username-readonly :deep(.el-input__wrapper) {
   background: rgba(87, 64, 36, 0.05) !important;
   box-shadow: inset 0 0 0 1px rgba(87, 64, 36, 0.12) !important;
@@ -641,7 +607,6 @@ onMounted(() => {
   color: #6f5438 !important;
 }
 
-/* ===== 简历区域 ===== */
 .resume-section { margin-top: 4px; }
 
 .upload-area {
@@ -709,7 +674,6 @@ onMounted(() => {
   border-top: 1px solid rgba(87, 64, 36, 0.18);
 }
 
-/* ===== 分析区域空态 ===== */
 .analysis-empty {
   display: flex;
   flex-direction: column;
@@ -734,7 +698,6 @@ onMounted(() => {
 .empty-title { font-size: 15px; color: #3b2412; margin: 0 0 6px; font-family: 'SimSun', 'Songti SC', serif; letter-spacing: 1px; }
 .empty-desc { font-size: 13px; color: rgba(87,64,36,0.55); margin: 0; }
 
-/* ===== 分析内容 ===== */
 .analysis-content {
   padding-top: 4px;
 }
@@ -759,7 +722,6 @@ onMounted(() => {
 
 .ana-icon { font-size: 16px; color: #3b2412; }
 
-/* 生成按钮 */
 .profile-actions { margin-bottom: 16px; }
 
 .profile-error {
@@ -768,7 +730,6 @@ onMounted(() => {
   margin: 0 0 12px;
 }
 
-/* Key 状态读取中：中性提示，不使用告警色 */
 .profile-hint-line {
   font-size: 12px;
   color: rgba(87, 64, 36, 0.6);
@@ -796,7 +757,6 @@ onMounted(() => {
 }
 .profile-hint p { margin: 0; }
 
-/* 综合评估 */
 .overall-row {
   display: flex;
   align-items: center;
@@ -880,7 +840,6 @@ onMounted(() => {
 .dot.ok { background: #10b981; }
 .dot.warn { background: #c2410c; }
 
-/* 技能达标度（三档） */
 .skill-tiers {
   display: flex;
   flex-direction: column;
@@ -933,7 +892,6 @@ onMounted(() => {
 .chip-listed { color: #b45309; border-color: rgba(180, 83, 9, 0.5); background: rgba(180, 83, 9, 0.08); }
 .chip-missing { color: #7a2a22; border-color: rgba(122, 42, 34, 0.5); background: rgba(122, 42, 34, 0.08); }
 
-/* 学历 / 经验 / 项目 / 证书 评估卡 */
 .edu-exp-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1009,7 +967,6 @@ onMounted(() => {
   font-family: 'SimSun', 'Songti SC', serif;
 }
 
-/* 待提升 / 优先建议 */
 .short-list {
   display: flex;
   flex-direction: column;
@@ -1042,7 +999,6 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-/* ===== Responsive ===== */
 @media (max-width: 1000px) {
   .user-layout { grid-template-columns: 1fr; }
 }
