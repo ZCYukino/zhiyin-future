@@ -20,7 +20,6 @@ const emit = defineEmits<{
 
 const SERIF = "'SimSun', 'Songti SC', 'STSong', 'Noto Serif SC', serif"
 
-// ===== 数据源：挂载后经 services 从后端加载 =====
 const graphData = ref<{ nodes: GraphNode[]; edges: GraphEdge[] }>({ nodes: [], edges: [] })
 const capabilityChanges = ref<CapabilityChange[]>([])
 const backendIntro = ref<JobIntro | null>(null)
@@ -29,14 +28,12 @@ const backendProgression = ref<SkillProgression | null>(null)
 const profile = ref<JobProfile | null>(null)
 const introLoading = ref(false)
 
-// ===== detail note (longer description, fallback to job.description) =====
 const detailNote = computed(() => {
   if (!props.job) return ''
   return profile.value?.overview || backendIntro.value?.duties?.join('；') || props.job.description || ''
 })
 
-// ===== 岗位定义要素（赛题①）：核心职责 + 典型行业应用场景 =====
-// 岗位画像（RAG+LLM 润色）优先，快照降级
+// 岗位画像优先，快照降级
 const jobIntro = computed<JobIntro | null>(() => {
   if (!props.job) return null
   const base = backendIntro.value
@@ -46,21 +43,17 @@ const jobIntro = computed<JobIntro | null>(() => {
   return { duties, scenarios }
 })
 
-// ===== 岗位画像富文本字段（软技能 / 发展路径 / 前景 / 薪资）=====
 const introOverview = computed(() => profile.value?.overview || '')
 const softSkills = computed(() => profile.value?.softSkills || [])
 const careerPath = computed(() => profile.value?.careerPath || [])
 const salaryReference = computed(() => profile.value?.salaryReference || '')
 const industryOutlook = computed(() => profile.value?.industryOutlook || '')
 
-// ===== skill progression (3-level matrix) =====
-// 数据源优先级：后端岗位画像富技能矩阵 > 后端详情快照矩阵 > JobItem 内嵌矩阵
 const skillProgression = computed<SkillProgression | null>(() => {
   if (!props.job) return null
   return backendProgression.value || props.job.progression || null
 })
 
-// 岗位画像中的富技能矩阵（含每个技能在本岗位的具体用途 desc）优先，快照矩阵降级
 const profileSkills = computed(() => profile.value?.skills || null)
 
 interface LevelSkill {
@@ -88,7 +81,6 @@ const seniorSkills = computed<LevelSkill[]>(() => {
   return toLevelSkills(src)
 })
 
-// ===== 三级资历列（用于技能矩阵渲染 + 点击弹介绍）=====
 interface LevelColumn {
   key: string
   mark: string
@@ -104,7 +96,6 @@ const levelColumns = computed<LevelColumn[]>(() => [
   { key: 'senior', mark: 'L3', name: '高级', sub: '资深专家', pri: '加分技能', priCls: 'pri-bonus', skills: seniorSkills.value },
 ])
 
-// ===== 技能点击弹介绍（与首页技术栈交互一致）=====
 const activeSkill = ref<string | null>(null)
 function toggleSkill(level: string, name: string) {
   const k = `${level}:${name}`
@@ -116,7 +107,6 @@ function onDocClick(e: MouseEvent) {
   }
 }
 
-// ===== join: prop.job → 图谱 job 节点（按 jobId 外键精确匹配）=====
 const graphNode = computed<GraphNode | null>(() => {
   if (!props.job) return null
   return graphData.value.nodes.find(n => n.type === 'job' && n.jobId === props.job!.id) || null
@@ -124,13 +114,11 @@ const graphNode = computed<GraphNode | null>(() => {
 
 const graphJobId = computed(() => graphNode.value?.id || '')
 
-// fallback: raw job.skills[] when no graph join
 const rawSkills = computed<string[]>(() => {
   if (!props.job) return []
   return props.job.skills || []
 })
 
-// ===== skill trend aggregation across all capability changes =====
 function skillTrendFor(skillName: string): 'up' | 'down' | 'stable' | 'new' {
   if (!skillName) return 'stable'
   const s = skillName.replace(/\s+/g, '').toLowerCase()
@@ -161,7 +149,6 @@ function skillTrendFor(skillName: string): 'up' | 'down' | 'stable' | 'new' {
   return 'stable'
 }
 
-// ===== capability evolution timeline (per-job, only if records exist) =====
 const evolutionChanges = computed<CapabilityChange[]>(() => {
   if (!graphJobId.value || !props.job) return []
   return capabilityChanges.value
@@ -169,7 +156,6 @@ const evolutionChanges = computed<CapabilityChange[]>(() => {
     .sort((a, b) => (a.period < b.period ? 1 : -1))
 })
 
-// ===== adjacent jobs (job↔job edges) =====
 interface AdjacentJob {
   label: string
   relation: 'similar' | 'transfer' | 'advanced'
@@ -204,7 +190,6 @@ const adjacentSimilar = computed(() => adjacentJobs.value.filter(a => a.relation
 const adjacentTransfer = computed(() => adjacentJobs.value.filter(a => a.relation === 'transfer'))
 const adjacentAdvanced = computed(() => adjacentJobs.value.filter(a => a.relation === 'advanced'))
 
-// ===== discovered job (isNew only) =====
 const discovered = computed(() => {
   if (!props.job || !props.job.isNew) return null
   if (!props.job.confidence) return null
@@ -215,7 +200,6 @@ const discovered = computed(() => {
   }
 })
 
-// ===== category & techstack =====
 const categoryName = computed(() => {
   if (!props.job) return ''
   return jobCategories.find(c => c.id === props.job!.categoryId)?.name || ''
@@ -226,15 +210,13 @@ const techStackName = computed(() => {
   return techStacksForGraph.find(t => t.id === gn.techStack)?.name || ''
 })
 
-// ===== city distribution bar chart =====
-// 分布可能为空数组：Math.max() 空参会得到 -Infinity，故以 0 兜底
+// 空数组时 Math.max 得 -Infinity，以 0 兜底
 const cityMax = computed(() => {
   if (!props.job) return 1
   const list = props.job.cityDistribution || []
   return Math.max(0, ...list.map(c => c.count)) || 1
 })
 
-// ===== 任职要求 (学历/经验 + 证书/专业背景等) =====
 const jobRequirement = computed<JobRequirement | null>(() => {
   if (!props.job) return null
   const p = profile.value?.requirements
@@ -246,7 +228,6 @@ const jobRequirement = computed<JobRequirement | null>(() => {
 const requirementRows = computed<{ label: string; value: string }[]>(() => {
   const r = jobRequirement.value
   if (!r) return []
-  // 后端未采集到的门槛字段为 null / 空：整行不展示，避免出现「学历要求：」这样的空值行
   const rows: { label: string; value: string }[] = []
   if (r.education) rows.push({ label: '学历要求', value: r.education })
   if (r.experience) rows.push({ label: '工作经验', value: r.experience })
@@ -254,7 +235,6 @@ const requirementRows = computed<{ label: string; value: string }[]>(() => {
   return rows
 })
 
-// ===== trend glyph meta =====
 function trendMeta(t: 'up' | 'down' | 'stable' | 'new') {
   switch (t) {
     case 'up':
@@ -276,7 +256,6 @@ function jobTrendMeta(t: JobItem['trend']) {
     case 'stable':
       return { glyph: '→', text: '稳定', color: 'rgba(87,64,36,0.55)' }
     default:
-      // 趋势缺失（后端未采集）时只显示占位符，不默认成「上升」
       return { glyph: '', text: MISSING_VALUE, color: 'rgba(87,64,36,0.55)' }
   }
 }
@@ -286,19 +265,17 @@ function onAdjacentClick(jid: string) {
 }
 
 async function loadJobDetail(jobId: string) {
-  // 同步清空旧数据，避免切换岗位瞬间显示上一岗位内容
   backendIntro.value = null
   backendRequirement.value = null
   backendProgression.value = null
   profile.value = null
   introLoading.value = true
   const d = await services.getJobDetail(jobId).catch(() => null)
-  if (props.job?.id !== jobId) return // 已切换岗位，丢弃过期结果
+  if (props.job?.id !== jobId) return
   if (d?.intro) backendIntro.value = d.intro
   if (d?.requirements) backendRequirement.value = d.requirements
   if (d?.progression) backendProgression.value = d.progression
 
-  // 岗位画像读取（后端只读快照预生成结果；缺失时返回 null）
   const p = await services.getJobProfile(jobId).catch(() => null)
   if (props.job?.id !== jobId) return
   if (p && p.duties?.length) profile.value = p
@@ -311,7 +288,6 @@ onMounted(async () => {
   if (g?.nodes?.length) graphData.value = g
   if (cc?.length) capabilityChanges.value = cc
 
-  // 岗位详情聚合（后端优先）
   if (props.job?.id) loadJobDetail(props.job.id)
 })
 
@@ -330,7 +306,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="job" class="detail-root paper-surface" @click.stop>
-    <!-- §1 Header -->
     <header class="detail-header">
       <div class="header-top">
         <div class="header-crumbs">
@@ -353,9 +328,7 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <!-- 关键指标（始终可见） -->
     <section class="metrics-grid">
-      <!-- 统计类字段可能为 null（后端未采集到即不编造）：一律以「—」呈现并隐去单位 -->
       <div class="metric-cell paper-inner">
         <div class="metric-value">{{ salaryRangeText(job.salaryMin, job.salaryMax) }}<span
           v-if="job.salaryMin != null && job.salaryMax != null" class="metric-unit">{{ job.salaryUnit }}</span></div>
@@ -379,7 +352,6 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <!-- 01 岗位介绍（默认展开） -->
     <details v-if="jobIntro" class="acc-section" open>
       <summary class="acc-header">
         <span class="title-bar"></span>
@@ -418,7 +390,6 @@ onBeforeUnmount(() => {
       </div>
     </details>
 
-    <!-- 02 岗位要求（硬性门槛 + 专业技能 + 软技能） -->
     <details v-if="requirementRows.length || skillProgression || profileSkills || rawSkills.length || softSkills.length" class="acc-section">
       <summary class="acc-header">
         <span class="title-bar"></span>
@@ -428,7 +399,6 @@ onBeforeUnmount(() => {
       <div class="acc-body">
         <p class="section-note">岗位的硬性门槛、专业技能与综合素养要求。</p>
 
-        <!-- 硬性门槛 -->
         <div v-if="requirementRows.length" class="req-sub">
           <div class="sub-label">硬性门槛</div>
           <div class="gate-row">
@@ -439,7 +409,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- 专业技能 -->
         <div v-if="skillProgression || profileSkills" class="req-sub">
           <div class="sub-label">专业技能</div>
           <p class="sub-hint">按初 / 中 / 高三级资历梳理，必备 / 重要 / 加分 对应岗位定义要素；▲▼●✦ 标记近期市场趋势，点击技能查看介绍。</p>
@@ -485,7 +454,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- 软技能 -->
         <div v-if="softSkills.length" class="req-sub">
           <div class="sub-label">软技能</div>
           <div class="soft-grid">
@@ -498,7 +466,6 @@ onBeforeUnmount(() => {
       </div>
     </details>
 
-    <!-- 03 职业前景（发展路径 + 行业前景·薪资 + 城市分布） -->
     <details v-if="careerPath.length || industryOutlook || salaryReference || job.cityDistribution?.length" class="acc-section">
       <summary class="acc-header">
         <span class="title-bar"></span>
@@ -548,7 +515,6 @@ onBeforeUnmount(() => {
       </div>
     </details>
 
-    <!-- 04 能力演化时间线 -->
     <details v-if="evolutionChanges.length" class="acc-section">
       <summary class="acc-header">
         <span class="title-bar"></span>
@@ -583,7 +549,6 @@ onBeforeUnmount(() => {
       </div>
     </details>
 
-    <!-- 05 相邻岗位 -->
     <details v-if="adjacentJobs.length" class="acc-section">
       <summary class="acc-header">
         <span class="title-bar"></span>
@@ -651,7 +616,6 @@ onBeforeUnmount(() => {
   z-index: 1;
 }
 
-/* ===== §1 Header ===== */
 .header-top {
   display: flex;
   justify-content: space-between;
@@ -726,7 +690,6 @@ onBeforeUnmount(() => {
   color: rgba(90, 61, 40, 0.75);
 }
 
-/* ===== §2 metrics ===== */
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -760,7 +723,6 @@ onBeforeUnmount(() => {
   letter-spacing: 1px;
 }
 
-/* ===== 合并分区内的子版块（divider 眉标分隔） ===== */
 .req-sub + .req-sub {
   margin-top: 22px;
 }
@@ -796,7 +758,6 @@ onBeforeUnmount(() => {
   font-style: italic;
 }
 
-/* ===== 硬性门槛 ===== */
 .gate-row {
   display: flex;
   flex-wrap: wrap;
@@ -825,7 +786,6 @@ onBeforeUnmount(() => {
   letter-spacing: 0.3px;
 }
 
-/* ===== 可折叠分区（accordion） ===== */
 .acc-section {
   margin-bottom: 12px;
   border: 1px solid rgba(87, 64, 36, 0.26);
@@ -884,7 +844,6 @@ onBeforeUnmount(() => {
   font-style: italic;
 }
 
-/* ===== 岗位介绍：核心职责 + 典型行业应用场景 ===== */
 .intro-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -995,7 +954,6 @@ onBeforeUnmount(() => {
   font-style: italic;
 }
 
-/* ===== §3 skills — 三级递进矩阵 ===== */
 .progression-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1092,7 +1050,6 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-/* 技能介绍弹出框（点击技能项上方，信纸质感，与首页技术栈交互一致） */
 .skill-pop {
   position: absolute;
   left: 0;
@@ -1192,14 +1149,12 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
-/* fallback flat chips (rawSkills) */
 .skill-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-/* ===== §4 evolution ===== */
 .evo-block {
   border: 1px solid rgba(87, 64, 36, 0.22);
   padding: 14px 16px;
@@ -1276,7 +1231,6 @@ onBeforeUnmount(() => {
 .evo-chip.up { border-color: rgba(5, 150, 105, 0.4); color: #047857; background: rgba(5, 150, 105, 0.05); }
 .evo-chip.down { border-color: rgba(220, 38, 38, 0.4); color: #b91c1c; background: rgba(220, 38, 38, 0.05); }
 
-/* ===== §5 city ===== */
 .city-list {
   padding: 14px 16px;
   border: 1px solid rgba(87, 64, 36, 0.22);
@@ -1320,7 +1274,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* ===== 软技能 ===== */
 .soft-grid {
   display: flex;
   flex-wrap: wrap;
@@ -1348,7 +1301,6 @@ onBeforeUnmount(() => {
   color: rgba(79, 57, 31, 0.85);
 }
 
-/* ===== 职业发展路径 ===== */
 .path-list {
   display: flex;
   flex-direction: column;
@@ -1387,7 +1339,6 @@ onBeforeUnmount(() => {
   color: rgba(79, 57, 31, 0.85);
 }
 
-/* ===== 行业前景 · 薪资参考 ===== */
 .outlook-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1417,7 +1368,6 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-/* ===== §7 adjacent ===== */
 .adj-group {
   margin-bottom: 14px;
 }
@@ -1462,7 +1412,6 @@ onBeforeUnmount(() => {
 .adj-chip.transfer { border-left: 3px solid #5a3d28; }
 .adj-chip.advanced { border-left: 3px solid #b45309; }
 
-/* ===== Responsive ===== */
 @media (max-width: 768px) {
   .detail-root {
     padding: 18px 16px 24px;
