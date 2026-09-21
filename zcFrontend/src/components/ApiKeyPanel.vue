@@ -1,6 +1,5 @@
 <template>
 	<div class="apikey-panel">
-		<!-- 指引区 -->
 		<div class="guide-area">
 			<div class="guide-head">
 				<span class="guide-title">{{ guide.title }}</span>
@@ -20,7 +19,6 @@
 			</ul>
 		</div>
 
-		<!-- 配置区 -->
 		<div class="config-area">
 			<div class="status-line">
 				<template v-if="status?.configured">
@@ -34,7 +32,6 @@
 					<span class="status-dot"></span>
 					<span class="status-text">状态读取失败</span>
 				</template>
-				<!-- 首次读取未落定前不断言「尚未配置」，避免闪一下红色误报 -->
 				<template v-else-if="!loaded">
 					<span class="status-dot pending"></span>
 					<span class="status-text">状态读取中…</span>
@@ -89,7 +86,7 @@ const inputKey = ref('')
 const showKey = ref(false)
 const saving = ref(false)
 const clearing = ref(false)
-const confirmingClear = ref(false) // 确认框已弹出：防止连点弹出多个确认框
+const confirmingClear = ref(false)
 
 async function save() {
   if (saving.value || clearing.value) return
@@ -110,8 +107,7 @@ async function save() {
 }
 
 async function clear() {
-  // 与「保存并验证」互斥：两笔写操作并发时后到的 load() 可能先返回，
-  // 状态会短暂显示成与实际相反的样子。
+  // 与保存互斥，避免两笔写操作并发时状态短暂错乱
   if (clearing.value || saving.value || confirmingClear.value) return
   confirmingClear.value = true
   try {
@@ -121,7 +117,7 @@ async function clear() {
       { confirmButtonText: '确定清除', cancelButtonText: '取消', type: 'warning' },
     )
   } catch {
-    return // 用户取消，不做任何变更
+    return
   } finally {
     confirmingClear.value = false
   }
@@ -267,7 +263,6 @@ onMounted(load)
   background: #2f6b46;
   box-shadow: 0 0 6px rgba(47, 107, 70, 0.4);
 }
-/* 读取中：中性灰点，不使用表示「未配置」的橙红告警色 */
 .status-dot.pending {
   background: rgba(87, 64, 36, 0.35);
   box-shadow: none;

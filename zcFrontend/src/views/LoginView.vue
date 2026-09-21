@@ -1,15 +1,12 @@
 <template>
   <div class="login-page">
-    <!-- 浮动职业名 -->
     <div class="careers-layer">
       <div v-for="(item, index) in floatingCareers" :key="index" class="career-drift" :style="item.driftStyle">
         <span class="career-word" :style="item.wordStyle">{{ item.name }}</span>
       </div>
     </div>
 
-    <!-- 两列纸页布局 -->
     <div class="book-shell" :class="{ visible: contentVisible }">
-      <!-- 左页：平台介绍 -->
       <section class="login-story">
         <div class="story-paper">
           <div class="paper-head">
@@ -55,10 +52,8 @@
         </div>
       </section>
 
-      <!-- 书脊 -->
       <div class="book-spine-visual"></div>
 
-      <!-- 右页：登录 -->
       <section class="login-panel">
         <div class="auth-paper">
           <div class="paper-head">
@@ -91,7 +86,6 @@
                 <span class="ribbon-item" v-for="s in steps" :key="s">{{ s }}</span>
               </div>
 
-              <!-- 登录表单 -->
               <form v-if="isLogin" class="form-area" :class="{ visible: formVisible }" @submit.prevent="handleAuth">
                 <div class="field">
                   <div class="field-head">
@@ -113,7 +107,6 @@
                 </div>
               </form>
 
-              <!-- 注册表单 -->
               <form v-else class="form-area" :class="{ visible: formVisible }" @submit.prevent="handleAuth">
                 <div class="field">
                   <div class="field-head">
@@ -188,7 +181,6 @@ const floatingCareers = (() => {
   return items
 })()
 
-// ===== 静态展示数据 =====
 const metrics = [
   { value: '30+', label: '核心岗位' },
   { value: '9', label: '岗位分类' },
@@ -203,7 +195,6 @@ const features = [
   { index: '04', title: '人岗匹配与差距分析', desc: '简历深度解析结合多维画像匹配，输出差距诊断报告与个性化学习路径规划' },
 ]
 
-// ===== 打字机状态 =====
 const isLogin = ref(true)
 const contentVisible = ref(false)
 const streamVisible = ref(false)
@@ -259,7 +250,6 @@ function clearSeq() {
 function runSequence() {
   clearSeq()
 
-  // Reset all
   mainDone.value = false
   typedSubTitle.value = ''; typingSub.value = true
   typedLabel1.value = ''; typingL1.value = false
@@ -269,13 +259,11 @@ function runSequence() {
   streamVisible.value = false; formVisible.value = false; bottomVisible.value = false
   loginForm.password = ''; registerForm.password = ''; registerForm.confirmPassword = ''
 
-  // Printer stream
   queue(() => { streamVisible.value = true }, 80)
   queue(() => { typeText(typedLine1, '多源数据采集引擎已就绪', ref(false), 10) }, 150)
   queue(() => { typeText(typedLine2, '岗位能力图谱构建完成', ref(false), 10) }, 400)
   queue(() => { typeText(typedLine3, '人岗匹配与差距分析待命中', ref(false), 10) }, 650)
 
-  // Right panel heading（登录/注册，不再重复品牌名）
   queue(() => { typeText(typedSubTitle, isLogin.value ? '登录' : '注册', typingSub, 30) }, 800)
   queue(() => { mainDone.value = true }, 1000)
   queue(() => { formVisible.value = true }, 1100)
@@ -297,7 +285,6 @@ function switchMode(mode: string) {
   nextTick(() => runSequence())
 }
 
-// ===== 认证 =====
 async function handleAuth() {
   if (isLogin.value) {
     if (!loginForm.username || !loginForm.password) { ElMessage.warning('请输入用户名和密码'); return }
@@ -342,7 +329,6 @@ onUnmounted(() => { clearSeq() })
   overflow: hidden;
 }
 
-/* ===== 浮动职业名 ===== */
 .careers-layer { position: absolute; inset: 0; overflow: hidden; z-index: 0; }
 .career-drift { position: absolute; white-space: nowrap; will-change: transform; }
 .career-drift:hover { animation-play-state: paused; }
@@ -360,7 +346,6 @@ onUnmounted(() => { clearSeq() })
   background: rgba(251, 243, 226, 0.95);
 }
 
-/* ===== 两页纸布局 ===== */
 .book-shell {
   position: relative;
   z-index: 1;
@@ -381,16 +366,13 @@ onUnmounted(() => { clearSeq() })
   border-radius: 1px;
 }
 
-/* ===== 纸页通用样式（信纸/旧纸张） ===== */
 .story-paper, .auth-paper {
   position: relative;
   background:
-    /* 四角老化泛黄 */
     radial-gradient(ellipse 80px 60px at 0% 0%, rgba(120, 80, 30, 0.14), transparent 70%),
     radial-gradient(ellipse 80px 60px at 100% 0%, rgba(120, 80, 30, 0.12), transparent 70%),
     radial-gradient(ellipse 90px 70px at 0% 100%, rgba(120, 80, 30, 0.16), transparent 70%),
     radial-gradient(ellipse 90px 70px at 100% 100%, rgba(120, 80, 30, 0.14), transparent 70%),
-    /* 纸面基底 */
     #fbf3e2;
   border: 1px solid rgba(87, 64, 36, 0.34);
   box-shadow:
@@ -403,7 +385,6 @@ onUnmounted(() => { clearSeq() })
   flex-direction: column;
   height: 100%;
 }
-/* 纸面细纤维纹理 */
 .story-paper::before, .auth-paper::before {
   content: '';
   position: absolute;
@@ -442,7 +423,6 @@ onUnmounted(() => { clearSeq() })
   user-select: none;
 }
 
-/* ===== 左页 ===== */
 .story-title {
   margin: 8px 0 0;
   font-family: 'Noto Serif SC', 'Songti SC', 'STSong', serif;
@@ -515,7 +495,6 @@ onUnmounted(() => { clearSeq() })
 .feature-title { margin: 0 0 4px; font-size: 13px; font-weight: 700; color: #3e2816; }
 .feature-desc { margin: 0; font-size: 12px; line-height: 1.7; color: rgba(79, 57, 31, 0.85); }
 
-/* 打印机流 */
 .printer-stream {
   padding: 14px 16px;
   border: 1px solid rgba(87, 64, 36, 0.26);
@@ -532,7 +511,6 @@ onUnmounted(() => { clearSeq() })
 .printer-body { display: flex; flex-direction: column; gap: 8px; }
 .printer-line { margin: 0; min-height: 20px; font-size: 12px; line-height: 1.7; color: rgba(74, 53, 30, 0.76); }
 
-/* ===== 右页 ===== */
 .auth-body { position: relative; }
 .auth-body::before {
   content: '';
@@ -711,7 +689,6 @@ onUnmounted(() => { clearSeq() })
 }
 .switch-btn:hover { color: #3b2412; border-bottom-color: #3b2412; }
 
-/* ===== Responsive ===== */
 @media (max-width: 1100px) {
   .book-shell { grid-template-columns: minmax(0, 1fr) 4px minmax(340px, 1fr); }
   .story-metrics { grid-template-columns: repeat(2, 1fr); }

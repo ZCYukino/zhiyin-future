@@ -1,7 +1,6 @@
 <template>
   <div class="jobs-page">
     <div class="jobs-content">
-      <!-- 标题 -->
       <section class="page-hero">
         <div class="hero-paper">
           <h1 class="hero-title">岗位介绍</h1>
@@ -9,7 +8,6 @@
         </div>
       </section>
 
-      <!-- 岗位搜索框（参考人岗匹配界面） -->
       <div class="search-bar">
         <el-select v-model="searchJobId" filterable clearable placeholder="搜索并选择岗位..." class="job-select"
           popper-class="job-select-popper" @change="onSearchSelect">
@@ -22,7 +20,6 @@
         </el-select>
       </div>
 
-      <!-- 分类导航栏 -->
       <div class="category-bar">
         <button class="category-tab" :class="{ active: activeCategory === '' }" @click="selectCategory('')">
           <IconEpMenu class="cat-icon" />
@@ -47,18 +44,15 @@
         </el-tooltip>
       </div>
 
-      <!-- 选中分类的定义摘要 -->
       <div v-if="activeDefinition" class="category-definition-bar">
         <span class="def-icon">●</span>
         <span class="def-text">{{ activeDefinition }}</span>
       </div>
 
-      <!-- 岗位卡片列表 -->
       <div class="jobs-grid">
         <div v-for="job in filteredJobs" :key="job.id" class="job-card"
           :class="{ highlighted: highlightId && highlightId === job.id }" @click="jobCardClick(job.id)">
           <div class="job-card-inner">
-            <!-- 头部：岗位名称 + 标识 + 薪资 -->
             <div class="job-card-head">
               <div class="job-card-title-row">
                 <h3 class="job-name">{{ job.name }}</h3>
@@ -73,10 +67,8 @@
 
             <div class="job-card-divider"></div>
 
-            <!-- 核心职责（两行截断） -->
             <p class="job-desc">{{ job.description }}</p>
 
-            <!-- 技能点级能力要求 -->
             <div class="job-req-block">
               <div class="req-head">
                 <span class="req-title">技能点要求</span>
@@ -92,7 +84,6 @@
               </div>
             </div>
 
-            <!-- 底部信息 -->
             <div class="job-card-footer">
               <div class="job-meta">
                 <span v-if="job.companyCount != null" class="job-companies">{{ job.companyCount }} 家在招</span>
@@ -103,7 +94,6 @@
           </div>
         </div>
 
-        <!-- 空态 -->
         <div v-if="filteredJobs.length === 0" class="empty-state">
           <div class="empty-icon"></div>
           <p class="empty-text">该分类下暂无岗位数据</p>
@@ -141,10 +131,10 @@ const selectedJob = ref<JobItem | null>(null);
 
 const allJobs = ref<JobItem[]>([])
 
-// 展示数据 = 后端精选的 30 条（含 5 新兴，已按热门程度降序）
+// 后端按热门程度降序返回
 const TOP_HOT_COUNT = 5
 
-/** 岗位在展示列表中的热门排名（1-5 为最热门 TOP5，0 表示非 TOP） */
+/** 热门排名：1-5 为 TOP5，其余为 0 */
 function topRank(job: JobItem): number {
   const idx = allJobs.value.findIndex(j => j.id === job.id)
   return idx >= 0 && idx < TOP_HOT_COUNT ? idx + 1 : 0
@@ -189,7 +179,6 @@ function getJobCount(catId: string): number {
   return allJobs.value.filter(j => j.categoryId === catId).length
 }
 
-// ===== 岗位卡片：技能点级能力要求 =====
 interface CardSkill {
   name: string
   priority: SkillPriority
@@ -198,7 +187,7 @@ interface CardSkill {
 const priRank: Record<SkillPriority, number> = { must: 0, important: 1, bonus: 2 }
 const lvlRank: Record<SkillLevel, number> = { junior: 0, mid: 1, senior: 2 }
 
-/** 取岗位技能矩阵（后端内嵌 progression，缺失回退 job.skills），按 优先级→资历 排序 */
+/** 技能矩阵缺失时回退 job.skills，按优先级→资历排序 */
 function jobSkillItems(job: JobItem): CardSkill[] {
   const prog = job.progression
   let specs: { name: string; level: SkillLevel }[] = []
@@ -219,7 +208,7 @@ function jobSkills(job: JobItem) {
   const all = jobSkillItems(job)
   return { all, top: all.slice(0, 6), extra: Math.max(0, all.length - 6), total: all.length }
 }
-/** 学历门槛短标签：统一为「X及以上」/「不限」（去掉「学历/学位」后缀、归一「以上」） */
+/** 学历短标签：X及以上 / 不限 */
 function jobEdu(job: JobItem): string {
   const s = (job.requirements?.education || '').trim()
   if (!s) return ''
@@ -254,12 +243,12 @@ onMounted(async () => {
   else highlightId.value = ''
 })
 
-// 支持从首页「新岗位发现」跳转：query.highlight 变化时自动打开详情
+// 从首页新岗位发现跳转：highlight 变化时打开详情
 watch(() => route.query.highlight, (v) => {
   if (v) openJob(v as string)
 })
 
-// 详情弹窗打开时锁定背景滚动，避免滚动弹窗内容时背景页也跟着滚
+// 弹窗打开时锁定背景滚动
 watch(jobUseDisabled, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
 })
@@ -280,7 +269,6 @@ onUnmounted(() => {
   padding: 28px 24px 40px;
 }
 
-/* ===== Hero ===== */
 .page-hero {
   margin-bottom: 24px;
 }
@@ -327,7 +315,6 @@ onUnmounted(() => {
   margin: 12px 0 0;
 }
 
-/* ===== 岗位搜索框 ===== */
 .search-bar {
   margin-bottom: 16px;
 }
@@ -378,7 +365,6 @@ onUnmounted(() => {
   color: #6f5438;
 }
 
-/* ===== 分类导航栏 ===== */
 .category-bar {
   display: flex;
   flex-wrap: wrap;
@@ -450,7 +436,6 @@ onUnmounted(() => {
   background: rgba(251, 243, 226, 0.12);
 }
 
-/* ===== 分类定义摘要 ===== */
 .category-definition-bar {
   display: flex;
   align-items: flex-start;
@@ -473,7 +458,6 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-/* ===== 岗位卡片网格 ===== */
 .jobs-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -547,7 +531,6 @@ onUnmounted(() => {
   background: rgba(243, 230, 203, 0.18);
 }
 
-/* 卡片头部 */
 .job-card-head {
   margin-bottom: 14px;
 }
@@ -607,14 +590,12 @@ onUnmounted(() => {
   color: #6f5438;
 }
 
-/* 分割线 */
 .job-card-divider {
   height: 1px;
   background: rgba(87, 64, 36, 0.18);
   margin-bottom: 12px;
 }
 
-/* 核心职责：两行截断，避免拉长卡片 */
 .job-desc {
   font-size: 13px;
   line-height: 1.7;
@@ -626,7 +607,6 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* 技能点级能力要求 */
 .job-req-block {
   flex: 1;
   margin-bottom: 14px;
@@ -696,7 +676,6 @@ onUnmounted(() => {
   font-family: 'Georgia', serif;
 }
 
-/* 底部 */
 .job-card-footer {
   display: flex;
   justify-content: space-between;
@@ -742,7 +721,6 @@ onUnmounted(() => {
   letter-spacing: 0.3px;
 }
 
-/* 空态 */
 .empty-state {
   grid-column: 1 / -1;
   display: flex;
@@ -777,7 +755,6 @@ onUnmounted(() => {
   letter-spacing: 1px;
 }
 
-/* ===== Responsive ===== */
 @media (max-width: 1100px) {
   .jobs-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -807,7 +784,6 @@ onUnmounted(() => {
 </style>
 
 <style>
-/* ===== Popper 自定义样式 ===== */
 .job-select-popper {
   background: #fbf3e2 !important;
   border: 1px solid rgba(87, 64, 36, 0.34) !important;
