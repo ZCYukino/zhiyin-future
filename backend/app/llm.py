@@ -1,7 +1,7 @@
-"""LLM 客户端：对话/生成走 DeepSeek（deepseek-flash），向量化走阿里云百炼 DashScope。
+"""LLM 客户端：对话走 DeepSeek，向量化走阿里云百炼 DashScope。
 
-Key 一律来自账号级凭据（app.settings），不再读取 .env；未配置抛 LLMNotConfigured，
-由调用方决定语义（不静默降级）。客户端按 (api_key, base_url) 复用，上限 32 个，超出淘汰最早插入项。
+Key 来自账号级凭据（app.settings）；未配置抛 LLMNotConfigured，由调用方决定语义。
+客户端按 (api_key, base_url) 复用，上限 32 个。
 """
 from __future__ import annotations
 
@@ -19,11 +19,11 @@ from . import config, settings
 
 logger = logging.getLogger("llm")
 
-# 重试参数：对齐参考实现（3 次 + 指数退避），仅对可重试的瞬时故障生效
+# 重试参数：3 次 + 指数退避，仅对可重试的瞬时故障生效
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 1.0
 
-# 思考模型可能输出思考内容，即使开启 JSON 模式也可能残留；统一剥离
+# 思考模型输出的思考内容统一剥离
 _THINKING_TAG_RE = re.compile(
     r"<\s*\|?\s*(?:reserved_think|thinking|thought|think)\s*\|?\s*>.*?<\s*\|?\s*/\s*(?:reserved_think|thinking|thought|think)\s*\|?\s*>",
     re.DOTALL | re.IGNORECASE,
@@ -37,8 +37,7 @@ class LLMNotConfigured(RuntimeError):
     """该账号未配置对应 provider 的 API Key（前端引导配置，不静默降级）。"""
 
 
-# 客户端缓存：按 (api_key, base_url) 复用 OpenAI 客户端；上限 32，超出时淘汰最早插入项。
-# 数据刷新后台线程与请求处理会并发访问，读写都持锁。
+# 客户端缓存：按 (api_key, base_url) 复用，上限 32；后台线程与请求处理并发访问，读写持锁
 _client_cache: OrderedDict[tuple[str, str], OpenAI] = OrderedDict()
 _client_lock = threading.Lock()
 
@@ -65,12 +64,10 @@ def generate(
     max_retries: int = MAX_RETRIES,
     credentials: settings.Credentials | None = None,
 ) -> str:
-    """调用 DeepSeek 生成文本，带指数退避重试（抗瞬时限流/网络抖动）。
+    """调用 DeepSeek 生成文本，带指数退避重试。
 
-    credentials 必须显式传入：用户请求传 settings.llm_credentials(user)，
-    系统级任务（数据刷新/富化）传 settings.system_llm_credentials()。
-    None 一律视为「调用方漏传凭据」并抛 LLMNotConfigured —— 绝不隐式回退到管理员 Key
-    （零相交：任何一次漏传都会变成静默花掉管理员配额，必须立刻炸出来）。
+    credentials 必须显式传入（用户请求传 llm_credentials，系统级任务传 system_llm_credentials）；
+    None 视为漏传凭据并抛 LLMNotConfigured，绝不隐式回退到管理员 Key。
     """
     if credentials is None:
         raise LLMNotConfigured(
@@ -87,9 +84,8 @@ def generate(
 
     kwargs: dict[str, Any] = {"temperature": temperature}
     if json_mode:
-        # OpenAI 兼容接口用 response_format 强制 JSON
         kwargs["response_format"] = {"type": "json_object"}
-    # 关闭思考链，避免返回残留 <thinking> 标签污染 JSON（仅百炼/DashScope 支持该参数）
+    # 关闭思考链，避免残留 thinking 标签污染 JSON（仅 DashScope 支持）
     if "dashscope" in (cred.base_url or ""):
         kwargs["extra_body"] = {"enable_thinking": False}
     if timeout is not None:
@@ -104,9 +100,9 @@ def generate(
                 **kwargs,
             )
             return resp.choices[0].message.content or ""
-        except Exception as e:  # noqa: BLE001 瞬时故障可重试，最终失败由调用方降级
+        except Exception as e:  # noqa: BLE001 瞬时故障可重试
             last_exc = e
-            # 若首次失败是 400（参数不被支持，如个别模型拒绝 enable_thinking），去掉该参数立即重试
+            # 首次失败是 400（模型拒绝 enable_thinking）时去掉该参数立即重试
             if attempt == 0 and "extra_body" in kwargs and getattr(e, "status_code", None) == 400:
                 kwargs.pop("extra_body", None)
                 logger.warning("enable_thinking 参数被模型拒绝，去掉后重试：%s", e)
@@ -130,7 +126,7 @@ def _strip_thinking(text: str) -> str:
 
 
 def _extract_json(text: str) -> Any:
-    """多策略解析 JSON，对齐参考实现的容错：直接解析 → 代码块 → 花括号配对。"""
+    """多策略解析 JSON：直接解析 → 代码块 → 花括号配对。"""
     text = _strip_thinking(text).strip()
 
     def _try(s: str) -> Any:
@@ -156,7 +152,7 @@ def _extract_json(text: str) -> Any:
         if block is not None:
             return block
 
-    # 3. 花括号配对：截取首个 { 到最后一个 }，容忍前后夹杂说明文字
+    # 3. 截取首个 { 到最后一个 }，容忍前后夹杂说明文字
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end > start:
@@ -176,11 +172,8 @@ def generate_json(
     max_retries: int = MAX_RETRIES,
     credentials: settings.Credentials | None = None,
 ) -> Any:
-    """生成并解析 JSON：LLMNotConfigured 向上抛（未配置≠生成失败）；其他失败返回 None。
-
-    credentials 同 generate：必须显式传入，缺省 None 会抛 LLMNotConfigured。
-    """
-    # 思考模型的 response_format=json_object 要求 prompt 显式包含 "JSON"
+    """生成并解析 JSON：LLMNotConfigured 向上抛；其他失败返回 None。credentials 须显式传入。"""
+    # json_object 模式要求 prompt 显式包含 "JSON"
     if "JSON" not in prompt:
         prompt = prompt + "\n\n请只输出 JSON，不要包含任何解释或 Markdown 代码块。"
     try:
@@ -205,11 +198,7 @@ def embed(
     model: str | None = None,
     credentials: settings.Credentials | None = None,
 ) -> list[list[float]]:
-    """批量向量化。
-
-    credentials 必须显式传入（系统级任务传 settings.embed_credentials()）；
-    None 视为漏传凭据并抛 LLMNotConfigured，绝不隐式回退到管理员账号的百炼 Key。
-    """
+    """批量向量化。credentials 必须显式传入，None 视为漏传并抛 LLMNotConfigured。"""
     if credentials is None:
         raise LLMNotConfigured(
             "内部调用必须显式传入凭据（系统任务请传 settings.embed_credentials()）"
@@ -233,10 +222,7 @@ def embed(
 
 
 def verify_api_key(provider: str, api_key: str, timeout: float = 20.0) -> str | None:
-    """实测校验：deepseek 发一次最小对话 / dashscope 发一次最短向量化。
-
-    成功返回 None；失败返回中文错误信息（对齐前端错误契约）。
-    """
+    """实测校验：deepseek 发一次最小对话 / dashscope 发一次最短向量化；失败返回中文错误。"""
     base_url = config.LLM_BASE_URL if provider == "deepseek" else config.DASHSCOPE_BASE_URL
     client = _client(api_key, base_url)
     try:
