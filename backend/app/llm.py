@@ -222,7 +222,7 @@ def embed(
 
 
 def verify_api_key(provider: str, api_key: str, timeout: float = 20.0) -> str | None:
-    """实测校验：deepseek 发一次最小对话 / dashscope 发一次最短向量化；失败返回中文错误。"""
+    """校验 Key 是否可用：deepseek 发一次最小对话 / dashscope 发一次最短向量化；失败返回中文错误。"""
     base_url = config.LLM_BASE_URL if provider == "deepseek" else config.DASHSCOPE_BASE_URL
     client = _client(api_key, base_url)
     try:
