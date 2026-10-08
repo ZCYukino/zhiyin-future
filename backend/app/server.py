@@ -22,7 +22,7 @@ from .rag import build_context
 
 logger = logging.getLogger("server")
 
-app = FastAPI(title="岗位能力图谱后端", version="1.0")
+app = FastAPI(title="职引未来——岗位职能图谱与人岗精准适配系统", version="1.0")
 
 app.add_middleware(
     CORSMiddleware,

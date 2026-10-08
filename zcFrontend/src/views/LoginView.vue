@@ -15,7 +15,7 @@
           <div class="paper-body">
             <p class="paper-watermark">JOB · SKILL · GRAPH</p>
             <h2 class="story-title">职引未来</h2>
-            <p class="story-subtitle">—— 岗位动态能力图谱与人岗精准适配系统</p>
+            <p class="story-subtitle">—— 岗位职能图谱与人岗精准适配系统</p>
             <div class="story-divider"></div>
             <p class="story-desc">
               依托多源真实招聘数据，构建「岗位 — 技能」能力图谱，动态追踪岗位能力演化，为人才培养与职业规划提供人岗匹配与差距分析支持。
