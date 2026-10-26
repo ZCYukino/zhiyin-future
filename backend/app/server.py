@@ -17,7 +17,7 @@ from .llm import LLMNotConfigured
 logger = logging.getLogger("server")
 SkillText = Annotated[str, StringConstraints(max_length=160)]
 
-app = FastAPI(title="职引未来——岗位职能图谱与人岗精准适配系统", version="1.0")
+app = FastAPI(title="职引未来——新质职业能力图谱与人岗精准匹配系统", version="1.0")
 
 app.add_middleware(
     CORSMiddleware,
