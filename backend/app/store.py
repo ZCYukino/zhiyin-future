@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import json
-import shutil
 import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -25,12 +25,21 @@ def _snapshot_path(ts: str) -> Path:
 
 def save_snapshot(data: dict[str, Any]) -> Path:
     """写入快照（原子替换），保留最近 N 版并删除更旧的。"""
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S%f") + "-" + uuid.uuid4().hex[:8]
     path = _snapshot_path(ts)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
-    _prune_snapshots()
+    config.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    with _snapshot_lock:
+        try:
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(path)  # 唯一发布点：此处之前，旧快照与旧向量始终可用。
+        finally:
+            tmp.unlink(missing_ok=True)
+        try:
+            _prune_snapshots()
+        except OSError:
+            # 发布已成功；清理失败不能把成功提交报告成失败。
+            pass
     return path
 
 
@@ -62,12 +71,12 @@ _snapshot_lock = threading.Lock()
 
 def load_cached_snapshot() -> dict[str, Any]:
     """读最新快照（进程内缓存，跨请求复用同一份对象）。返回共享对象，调用方只读。"""
-    snaps = list_snapshots()
-    if not snaps:
-        return {}
-    latest = snaps[-1]
-    path = str(latest)
     with _snapshot_lock:
+        snaps = list_snapshots()
+        if not snaps:
+            return {}
+        latest = snaps[-1]
+        path = str(latest)
         # stat 必须在锁内做：失败回滚会删最新快照文件，锁外可能撞上文件被删
         mtime = latest.stat().st_mtime
         if _snapshot_cache["path"] == path and _snapshot_cache["mtime"] == mtime:
@@ -84,10 +93,11 @@ def ensure_seed_snapshot() -> None:
     if not SEED_SNAPSHOT.exists():
         return
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    shutil.copyfile(SEED_SNAPSHOT, _snapshot_path(ts))
+    data = json.loads(SEED_SNAPSHOT.read_text(encoding="utf-8"))
+    data["meta"] = {**(data.get("meta") or {}), "source": "seed", "mode": "demo", "capabilityChangesKind": "demo"}
+    _snapshot_path(ts).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-# ChromaDB 底层为 SQLite，并发读写会触发锁冲突；此锁覆盖集合的读/写/重建
 col_lock = threading.Lock()
 
 _chroma_client: chromadb.ClientAPI | None = None
@@ -100,7 +110,9 @@ def _get_chroma() -> chromadb.ClientAPI:
     return _chroma_client
 
 
-def get_collection():
+def get_collection(name: str | None = None):
+    if name:
+        return _get_chroma().get_collection(name=name)
     return _get_chroma().get_or_create_collection(
         name=config.COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
@@ -117,7 +129,26 @@ def reset_collection():
         return get_collection()
 
 
-def upsert_fragments(ids, texts, metadatas, embeddings) -> None:
+def create_vector_collection(name: str) -> None:
     with col_lock:
-        col = get_collection()
-        col.upsert(ids=ids, documents=texts, metadatas=metadatas, embeddings=embeddings)
+        _get_chroma().create_collection(name=name, metadata={"hnsw:space": "cosine"})
+
+
+def delete_vector_collection(name: str) -> None:
+    with col_lock:
+        _get_chroma().delete_collection(name=name)
+
+
+def upsert_fragments(ids, texts, metadatas, embeddings, collection_name: str | None = None) -> None:
+    if not ids:
+        return
+    with col_lock:
+        client = _get_chroma()
+        max_batch = getattr(client, "get_max_batch_size", None)
+        max_batch = max_batch() if callable(max_batch) else getattr(client, "max_batch_size", 1000)
+        batch_size = min(1000, max_batch) if isinstance(max_batch, int) and max_batch > 0 else 1000
+        col = get_collection(collection_name)
+        for start in range(0, len(ids), batch_size):
+            end = start + batch_size
+            col.upsert(ids=ids[start:end], documents=texts[start:end],
+                       metadatas=metadatas[start:end], embeddings=embeddings[start:end])

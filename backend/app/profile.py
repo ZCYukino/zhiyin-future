@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any
 
@@ -62,12 +63,18 @@ def _validate(data: dict[str, Any]) -> dict[str, Any] | None:
     def strs(v: Any) -> str | None:
         return v if isinstance(v, str) and v.strip() else None
 
-    def num(v: Any, lo: int, hi: int) -> int | None:
-        try:
-            n = int(v)
-        except (TypeError, ValueError):
+    def num(v: Any, lo: int, hi: int, *, fractional: bool = False) -> int | float | None:
+        if isinstance(v, bool):
             return None
-        return n if lo <= n <= hi else None
+        try:
+            n = float(v)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(n) or not lo <= n <= hi:
+            return None
+        if not fractional and not n.is_integer():
+            return None
+        return int(n) if n.is_integer() else n
 
     overall = num(data.get("overallScore"), 0, 100)
     level = data.get("competitivenessLevel")
@@ -89,7 +96,7 @@ def _validate(data: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     xa = data.get("experienceAssessment") if isinstance(data.get("experienceAssessment"), dict) else {}
-    xa_years = num(xa.get("years"), 0, 100)
+    xa_years = num(xa.get("years"), 0, 100, fractional=True)
     xa_level = strs(xa.get("level"))
     xa_analysis = strs(xa.get("analysis"))
     if xa_years is None or xa_level is None or xa_analysis is None:

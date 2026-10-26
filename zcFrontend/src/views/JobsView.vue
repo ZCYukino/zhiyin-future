@@ -49,7 +49,15 @@
         <span class="def-text">{{ activeDefinition }}</span>
       </div>
 
-      <div class="jobs-grid">
+      <el-alert v-if="dataError" class="catalogue-alert" :title="dataError" type="warning" :closable="false" show-icon role="alert">
+        <el-button size="small" :loading="dataLoading" @click="loadJobs">重试读取岗位数据</el-button>
+      </el-alert>
+      <div v-if="dataLoading" class="catalogue-loading" role="status" aria-live="polite">
+        <IconEpLoading class="loading-icon" aria-hidden="true" />
+        <span>正在读取岗位数据…</span>
+      </div>
+
+      <div class="jobs-grid" :aria-busy="dataLoading">
         <div v-for="job in filteredJobs" :key="job.id" class="job-card"
           :class="{ highlighted: highlightId && highlightId === job.id }" @click="jobCardClick(job.id)">
           <div class="job-card-inner">
@@ -78,7 +86,7 @@
                 <span v-for="s in jobSkills(job).top" :key="s.name" class="req-chip"
                   :class="s.priority === 'must' ? 'req-must' : 'req-other'"
                   :title="priTitle(s.priority) + ' · ' + (s.level === 'junior' ? '入门' : s.level === 'mid' ? '进阶' : '资深')">
-                  {{ s.name }}
+                  {{ s.name }}<span class="req-evidence"> · {{ skillEvidenceLabel(s.evidenceKind) }}</span>
                 </span>
                 <span v-if="jobSkills(job).extra > 0" class="req-more">+{{ jobSkills(job).extra }}</span>
               </div>
@@ -94,9 +102,9 @@
           </div>
         </div>
 
-        <div v-if="filteredJobs.length === 0" class="empty-state">
+        <div v-if="!dataLoading && !dataError && filteredJobs.length === 0" class="empty-state" role="status">
           <div class="empty-icon"></div>
-          <p class="empty-text">该分类下暂无岗位数据</p>
+          <p class="empty-text">{{ activeCategory ? '该分类下暂无岗位数据' : '当前暂无岗位数据' }}</p>
         </div>
       </div>
       <div class="job-detail-container" v-if="jobUseDisabled" @click="closeDetail">
@@ -113,8 +121,8 @@
 
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
-import { jobCategories, priorityOf, salaryRangeText, trendText, MISSING_VALUE } from '@/models'
-import type { JobItem, SkillLevel, SkillPriority } from '@/models'
+import { jobCategories, priorityOf, salaryRangeText, trendText, skillEvidenceLabel, MISSING_VALUE } from '@/models'
+import type { JobItem, SkillLevel, SkillPriority, SkillEvidenceKind } from '@/models'
 import { services } from '@/services'
 
 import jobDetail from '@/components/jobDetail.vue'
@@ -130,13 +138,20 @@ const jobUseDisabled = ref(false);
 const selectedJob = ref<JobItem | null>(null);
 
 const allJobs = ref<JobItem[]>([])
+const dataLoading = ref(false)
+const dataError = ref('')
+let disposed = false
 
-// 后端按热门程度降序返回
 const TOP_HOT_COUNT = 5
+
+function hasHeat(job: JobItem): boolean {
+  return typeof job.hotScore === 'number' && Number.isFinite(job.hotScore)
+}
 
 /** 热门排名：1-5 为 TOP5，其余为 0 */
 function topRank(job: JobItem): number {
-  const idx = allJobs.value.findIndex(j => j.id === job.id)
+  if (!hasHeat(job)) return 0
+  const idx = allJobs.value.filter(hasHeat).findIndex(j => j.id === job.id)
   return idx >= 0 && idx < TOP_HOT_COUNT ? idx + 1 : 0
 }
 
@@ -183,6 +198,7 @@ interface CardSkill {
   name: string
   priority: SkillPriority
   level: SkillLevel
+  evidenceKind: SkillEvidenceKind
 }
 const priRank: Record<SkillPriority, number> = { must: 0, important: 1, bonus: 2 }
 const lvlRank: Record<SkillLevel, number> = { junior: 0, mid: 1, senior: 2 }
@@ -190,18 +206,18 @@ const lvlRank: Record<SkillLevel, number> = { junior: 0, mid: 1, senior: 2 }
 /** 技能矩阵缺失时回退 job.skills，按优先级→资历排序 */
 function jobSkillItems(job: JobItem): CardSkill[] {
   const prog = job.progression
-  let specs: { name: string; level: SkillLevel }[] = []
+  let specs: { name: string; level: SkillLevel; evidenceKind: SkillEvidenceKind }[] = []
   if (prog) {
     specs = [
-      ...prog.junior.map(s => ({ name: s.name, level: 'junior' as const })),
-      ...prog.mid.map(s => ({ name: s.name, level: 'mid' as const })),
-      ...prog.senior.map(s => ({ name: s.name, level: 'senior' as const })),
+      ...prog.junior.map(s => ({ name: s.name, level: 'junior' as const, evidenceKind: s.evidenceKind ?? 'unverified' as const })),
+      ...prog.mid.map(s => ({ name: s.name, level: 'mid' as const, evidenceKind: s.evidenceKind ?? 'unverified' as const })),
+      ...prog.senior.map(s => ({ name: s.name, level: 'senior' as const, evidenceKind: s.evidenceKind ?? 'unverified' as const })),
     ]
   } else {
-    specs = job.skills.map(s => ({ name: s, level: 'junior' as SkillLevel }))
+    specs = job.skills.map(s => ({ name: s, level: 'junior' as const, evidenceKind: 'unverified' as const }))
   }
   return specs
-    .map(s => ({ name: s.name, priority: priorityOf(s.level), level: s.level }))
+    .map(s => ({ ...s, priority: priorityOf(s.level) }))
     .sort((a, b) => priRank[a.priority] - priRank[b.priority] || lvlRank[a.level] - lvlRank[b.level])
 }
 function jobSkills(job: JobItem) {
@@ -232,16 +248,30 @@ function selectCategory(catId: string) {
   activeCategory.value = activeCategory.value === catId ? '' : catId
 }
 
-onMounted(async () => {
+async function loadJobs() {
+  if (disposed || dataLoading.value) return
+  dataLoading.value = true
   try {
-    allJobs.value = await services.getFeaturedJobs()
+    const jobs = await services.getJobs()
+    if (disposed) return
+    allJobs.value = [...jobs].sort((a, b) => {
+      if (hasHeat(a) && hasHeat(b)) return b.hotScore! - a.hotScore!
+      return hasHeat(a) ? -1 : hasHeat(b) ? 1 : 0
+    })
+    dataError.value = ''
+    const hl = typeof route.query.highlight === 'string' ? route.query.highlight : ''
+    if (hl) openJob(hl)
+    else highlightId.value = ''
   } catch {
-    allJobs.value = []
+    if (!disposed) dataError.value = allJobs.value.length
+      ? '岗位数据读取失败，已保留上次读取的岗位。请重试。'
+      : '岗位数据读取失败，请检查网络后重试。'
+  } finally {
+    if (!disposed) dataLoading.value = false
   }
-  const hl = (route.query.highlight as string) || ''
-  if (hl) openJob(hl)
-  else highlightId.value = ''
-})
+}
+
+onMounted(loadJobs)
 
 // 从首页新岗位发现跳转：highlight 变化时打开详情
 watch(() => route.query.highlight, (v) => {
@@ -254,6 +284,7 @@ watch(jobUseDisabled, (open) => {
 })
 
 onUnmounted(() => {
+  disposed = true
   document.body.style.overflow = ''
 })
 </script>
@@ -464,6 +495,31 @@ onUnmounted(() => {
   gap: 20px;
 }
 
+.catalogue-alert {
+  margin-bottom: 20px;
+}
+
+.catalogue-loading {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-text-regular);
+}
+
+.loading-icon {
+  animation: catalogue-spin 1s linear infinite;
+}
+
+@keyframes catalogue-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-icon { animation: none; }
+}
+
 .job-card {
   background:
     radial-gradient(ellipse 80px 60px at 0% 0%, rgba(120, 80, 30, 0.14), transparent 70%),
@@ -657,6 +713,10 @@ onUnmounted(() => {
   color: #fbf3e2;
   border-color: #2a1a0e;
   font-weight: 600;
+}
+
+.req-evidence {
+  font-weight: 400;
 }
 
 .req-chip.req-other:hover {

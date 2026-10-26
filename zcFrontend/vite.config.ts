@@ -7,7 +7,7 @@ import Icons from 'unplugin-icons/vite'
 import IconsResolver from 'unplugin-icons/resolver'
 import { resolve } from 'path'
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     vue(),
     AutoImport({
@@ -16,14 +16,14 @@ export default defineConfig({
         IconsResolver({ prefix: 'Icon' }),
       ],
       imports: ['vue', 'vue-router', 'pinia'],
-      dts: 'src/auto-imports.d.ts',
+      dts: command === 'serve' ? 'src/auto-imports.d.ts' : false,
     }),
     Components({
       resolvers: [
         ElementPlusResolver(),
         IconsResolver({ enabledCollections: ['ep'] }),
       ],
-      dts: 'src/components.d.ts',
+      dts: command === 'serve' ? 'src/components.d.ts' : false,
     }),
     Icons({ autoInstall: true }),
   ],
@@ -36,4 +36,4 @@ export default defineConfig({
     port: 5173,
     open: true,
   },
-})
+}))

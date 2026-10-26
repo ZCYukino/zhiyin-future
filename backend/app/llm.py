@@ -1,8 +1,4 @@
-"""LLM 客户端：对话走 DeepSeek，向量化走阿里云百炼 DashScope。
-
-Key 来自账号级凭据（app.settings）；未配置抛 LLMNotConfigured，由调用方决定语义。
-客户端按 (api_key, base_url) 复用，上限 32 个。
-"""
+"""LLM 客户端：对话走 DeepSeek，向量化走阿里云百炼 DashScope。"""
 from __future__ import annotations
 
 import json
@@ -37,7 +33,6 @@ class LLMNotConfigured(RuntimeError):
     """该账号未配置对应 provider 的 API Key（前端引导配置，不静默降级）。"""
 
 
-# 客户端缓存：按 (api_key, base_url) 复用，上限 32；后台线程与请求处理并发访问，读写持锁
 _client_cache: OrderedDict[tuple[str, str], OpenAI] = OrderedDict()
 _client_lock = threading.Lock()
 
@@ -85,7 +80,6 @@ def generate(
     kwargs: dict[str, Any] = {"temperature": temperature}
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
-    # 关闭思考链，避免残留 thinking 标签污染 JSON（仅 DashScope 支持）
     if "dashscope" in (cred.base_url or ""):
         kwargs["extra_body"] = {"enable_thinking": False}
     if timeout is not None:

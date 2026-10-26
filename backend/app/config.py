@@ -38,7 +38,8 @@ COLLECTION_NAME = "jd_fragments"
 DB_PATH = _env("DB_PATH", str(DATA_DIR / "users.db"))
 
 # JWT
-JWT_SECRET = _env("JWT_SECRET", "zhiyin-future-jwt-secret-change-me")
+# 未设置或仍是旧模板值时，使用用户库内持久化的随机密钥
+JWT_SECRET = _env("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = int(_env("JWT_EXPIRE_HOURS", "24"))
 

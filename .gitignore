@@ -17,26 +17,18 @@ Thumbs.db
 __pycache__/
 *.pyc
 
-# 说明：backend/.env 不再提交（API Key 已改为页面配置，存 SQLite data/users.db）。
-# 此处不再忽略 .env 的注释已移除；如本地有 .env 请勿提交。
+# 本机环境配置（保留可公开的示例模板）
+.env
+.env.*
+!.env.example
+
+# 由主项目前端构建生成，部署前重新构建
+backend/webapp/
 
 # 部署产物 / 构建缓存
 deploy.tar.gz
 *.tsbuildinfo
 
-# 临时探测目录（CDP / headless 验证残留）
-tmp_cdp_probe*/
-zcFrontend/tmp_*.png
-
-# 误生成的构建配置产物（由 tsc -b 或误编译产生）
+# 误生成的构建配置产物
 zcFrontend/vite.config.js
 zcFrontend/vite.config.d.ts
-
-# 可视化设计会话产物
-.superpowers/
-
-# 本地设计/过程文档目录
-docs/superpowers/
-
-# 本地工具数据目录
-.workbuddy/

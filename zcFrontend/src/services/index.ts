@@ -13,6 +13,7 @@ import type {
   SavedMatchReport,
   ApiKeyConfig,
   ApiKeyStatus,
+  SkillEvidenceKind,
 } from '@/models'
 import {
   parseResumeFile as doParseResumeFile,
@@ -66,7 +67,28 @@ export interface RefreshStatus {
     profileCount: number
     failedJobs: string[]
     failedProfiles: string[]
+    rawCount?: number
+    cleanedCount?: number
+    newCount?: number
+    updatedCount?: number
+    duplicateCount?: number
+    retainedExtractionCount?: number
+    unchanged?: boolean
+    archiveCount?: number
+    reusedCount?: number
+    sourceCounts?: Record<string, number>
+    failedSources?: string[]
+    sampled?: boolean
+    maxPages?: number
+    limitPerKeyword?: number
   } | null
+}
+
+export interface DataStatus {
+  mode: 'demo' | 'real' | 'unknown'
+  jobCount: number
+  archiveCount: number | null
+  capabilityChangesKind?: string
 }
 
 /** 岗位画像（详情页富文本） */
@@ -91,6 +113,7 @@ export interface JobProfileCareerStage {
 export interface JobProfileSkillSpec {
   name: string
   desc?: string
+  evidenceKind?: SkillEvidenceKind
 }
 export interface JobProfileSkillMatrix {
   junior: JobProfileSkillSpec[]
@@ -110,6 +133,9 @@ export interface JobProfile {
 }
 
 export const services = {
+  getDataStatus(): Promise<DataStatus> {
+    return http<DataStatus>('/data-status')
+  },
   /** 岗位列表（GET /jobs，支持分类/关键字/新岗位/热门筛选） */
   getJobs(params: JobListParams = {}): Promise<JobItem[]> {
     const path = '/jobs' + qs({ categoryId: params.categoryId, keyword: params.keyword, newOnly: params.newOnly, hot: params.hot })

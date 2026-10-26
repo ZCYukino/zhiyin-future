@@ -1,32 +1,26 @@
-"""FastAPI 在线服务：路由定义见本文件，启动后可在 /docs 查看完整接口清单。
-
-基路径 /api/v1；读知识库快照 + RAG 实时图谱生成。
-运行：cd backend && uvicorn app.server:app --reload --port 8000
-"""
+"""FastAPI 在线服务：路由定义见本文件，启动后可在 /docs 查看完整接口清单。"""
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from . import auth, config, db, llm, matching, profile, settings, store
-from .extract import CATEGORIES
-from .llm import LLMNotConfigured, generate_json
-from .prompts import JOB_PROFILE_PROMPT
-from .rag import build_context
+from .llm import LLMNotConfigured
 
 logger = logging.getLogger("server")
+SkillText = Annotated[str, StringConstraints(max_length=160)]
 
 app = FastAPI(title="职引未来——岗位职能图谱与人岗精准适配系统", version="1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    # Bearer 鉴权（非 Cookie），避免 allow_origins=["*"] + credentials 的 CORS 冲突
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
@@ -53,7 +47,7 @@ def load_knowledge() -> dict[str, Any]:
 
 
 def _with_details(lst: list[dict[str, Any]], k: dict[str, Any]) -> list[dict[str, Any]]:
-    """把 AI 生成的技能矩阵/任职要求内嵌进每个岗位对象，前端卡片可直接渲染，避免按 id 撞库。"""
+    """把技能矩阵与任职要求内嵌进每个岗位对象，前端卡片可直接渲染，避免按 id 撞库。"""
     prog = k.get("jobSkillProgression", {}) or {}
     req = k.get("jobRequirements", {}) or {}
     # 返回新 dict：lst 里的 job 对象属于快照缓存，就地改会污染后续请求
@@ -63,137 +57,18 @@ def _with_details(lst: list[dict[str, Any]], k: dict[str, Any]) -> list[dict[str
     ]
 
 
-_CATEGORY_NAMES = {c["id"]: c["name"] for c in CATEGORIES}
-
-
-def _build_job_context(job: dict[str, Any], k: dict[str, Any]) -> str:
-    """把本地知识库中该岗位的全部结构化信息汇总为 LLM 参考上下文。"""
-    jid = job.get("id")
-    lines = [
-        f"名称：{job.get('name', '')}",
-        f"分类：{_CATEGORY_NAMES.get(job.get('categoryId', ''), '')}",
-        f"薪资：{job.get('salaryMin', '')}-{job.get('salaryMax', '')} {job.get('salaryUnit', 'K/月')}",
-        # 字段为 None 时用 or，dict 默认值对显式 None 不生效
-        f"招聘公司数：{job.get('companyCount') or ''}家",
-        f"热度：{job.get('hotScore') or ''}",
-        f"技能标签：{'、'.join(job.get('skills', []) or [])}",
-    ]
-    prog = (k.get("jobSkillProgression") or {}).get(jid)
-    if prog:
-        for lv, label in (("junior", "初级·必备"), ("mid", "中级·重要"), ("senior", "高级·加分")):
-            names = [s["name"] if isinstance(s, dict) else str(s) for s in (prog.get(lv) or [])]
-            if names:
-                lines.append(f"技能矩阵 {label}：{'、'.join(names)}")
-    req = (k.get("jobRequirements") or {}).get(jid)
-    if req:
-        lines.append(f"任职要求：学历 {req.get('education', '')}，经验 {req.get('experience', '')}")
-    intro = (k.get("jobIntro") or {}).get(jid)
-    if intro:
-        duties = intro.get("duties") or []
-        if duties:
-            lines.append(f"已知职责：{'；'.join(duties)}")
-        scen = intro.get("scenarios") or []
-        if scen:
-            lines.append(f"已知场景：{'；'.join(s.get('name', '') for s in scen if isinstance(s, dict))}")
-    changes = [c for c in (k.get("capabilityChanges") or []) if c.get("jobId") == jid]
-    if changes:
-        # 取 period 最大的一条作为近期
-        recent = max(changes, key=lambda c: str(c.get("period", "")))
-        parts = []
-        if recent.get("addedSkills"):
-            parts.append(f"新增 {'、'.join(recent['addedSkills'])}")
-        if recent.get("importanceUp"):
-            parts.append(f"重要性上升 {'、'.join(recent['importanceUp'])}")
-        if parts:
-            lines.append(f"近期能力演化（{recent.get('period', '')}）：{'；'.join(parts)}")
-    return "\n".join(lines)
-
-
-def generate_job_profile(job: dict[str, Any], k: dict[str, Any]) -> dict[str, Any] | None:
-    """RAG + LLM 生成岗位画像（富文本详情）；LLM 失败/非 dict 返回 None（不拼装模板内容）。
-
-    本函数只被 enrich 后台富化调用（系统级任务），故在此显式取管理员账号的 Key，
-    不做任何隐式回退。
-    """
-    credentials = settings.system_llm_credentials()
-    context = build_context(job["name"], top_k=8)
-    structured = _build_job_context(job, k)
-    prompt = JOB_PROFILE_PROMPT.format(name=job["name"], structured=structured, context=context[:6000])
-    data = generate_json(prompt, system="你是严谨的岗位研究专家。", credentials=credentials)
-    if not isinstance(data, dict):
-        return None
-    return _parse_job_profile(data)
-
-
-def _parse_job_profile(data: dict[str, Any]) -> dict[str, Any]:
-    """只把 LLM 输出里的合法字段转成标准结构；LLM 未给的字段留空，绝不填模板。"""
-
-    def strl(v: Any) -> list[str]:
-        if not isinstance(v, list):
-            return []
-        return [x for x in v if isinstance(x, str) and x.strip()]
-
-    def strs(v: Any) -> str:
-        return v.strip() if isinstance(v, str) else ""
-
-    def dicts(v: Any) -> list[dict[str, Any]]:
-        if not isinstance(v, list):
-            return []
-        return [x for x in v if isinstance(x, dict)]
-
-    def named(v: Any) -> list[dict[str, Any]]:
-        return [
-            {"name": x.get("name", "").strip(), "desc": str(x.get("desc") or "").strip()}
-            for x in dicts(v)
-            if isinstance(x.get("name"), str) and x.get("name", "").strip()
-        ]
-
-    req = data.get("requirements") if isinstance(data.get("requirements"), dict) else {}
-    extra = [
-        {"label": str(x.get("label") or "").strip(), "value": str(x.get("value") or "").strip()}
-        for x in dicts(req.get("extra"))
-        if str(x.get("label") or "").strip() and str(x.get("value") or "").strip()
-    ]
-    skills = data.get("skills") if isinstance(data.get("skills"), dict) else {}
-    return {
-        "overview": strs(data.get("overview")),
-        "duties": strl(data.get("duties"))[:6],
-        "scenarios": named(data.get("scenarios"))[:4],
-        "requirements": {
-            "education": strs(req.get("education")),
-            "experience": strs(req.get("experience")),
-            "extra": extra,
-        },
-        "skills": {
-            lv: named(skills.get(lv))[:5]
-            for lv in ("junior", "mid", "senior")
-        },
-        "softSkills": named(data.get("softSkills"))[:5],
-        "careerPath": [
-            {
-                "stage": str(x.get("stage") or "").strip(),
-                "title": str(x.get("title") or "").strip(),
-                "desc": str(x.get("desc") or "").strip(),
-            }
-            for x in dicts(data.get("careerPath"))
-            if isinstance(x.get("title"), str) and x.get("title", "").strip()
-        ][:4],
-        "salaryReference": strs(data.get("salaryReference")),
-        "industryOutlook": strs(data.get("industryOutlook")),
-    }
-
-
 class RegisterRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=128)
+    password: str = Field(max_length=1024)
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=128)
+    password: str = Field(max_length=1024)
 
 
 class UserUpdateRequest(BaseModel):
+    model_config = ConfigDict(str_max_length=5000)
     name: str | None = None
     email: str | None = None
     phone: str | None = None
@@ -203,32 +78,42 @@ class UserUpdateRequest(BaseModel):
     experience: str | None = None
     certificates: str | None = None
     internship: str | None = None
-    userSkills: list[str] | None = None
+    userSkills: list[SkillText] | None = Field(default=None, max_length=200)
     hasResume: bool | None = None
     resumeName: str | None = None
-    resumeText: str | None = None
+    resumeText: str | None = Field(default=None, max_length=100000)
     resumeYears: str | None = None
     awards: str | None = None
-    projects: str | None = None
-    skillEvidence: str | None = None
+    projects: str | None = Field(default=None, max_length=20000)
+    skillEvidence: str | None = Field(default=None, max_length=20000)
 
 
 class ChangePasswordRequest(BaseModel):
-    oldPassword: str
-    newPassword: str
+    oldPassword: str = Field(max_length=1024)
+    newPassword: str = Field(max_length=1024)
+
+
+class MatchUserRequest(BaseModel):
+    model_config = ConfigDict(str_max_length=5000)
+    userSkills: list[SkillText] = Field(default_factory=list, max_length=200)
+    resumeText: str | None = Field(default=None, max_length=100000)
+    education: str | None = None
+    major: str | None = None
+    resumeYears: str | None = None
+    experience: str | None = None
 
 
 class MatchRequest(BaseModel):
-    jobId: str
-    user: dict[str, Any]
+    jobId: str = Field(max_length=128)
+    user: MatchUserRequest
 
 
 class ApiKeyRequest(BaseModel):
-    provider: str
-    apiKey: str
+    provider: str = Field(max_length=32)
+    apiKey: str = Field(max_length=512)
 
 
-# PUT / DELETE 共用一份白名单，避免校验漂移
+# PUT / DELETE 共用白名单
 _PROVIDERS = ("deepseek", "dashscope")
 
 
@@ -251,7 +136,11 @@ def _current_user(authorization: str | None) -> dict[str, Any] | None:
     if not payload or not payload.get("sub"):
         return None
     try:
-        return db.get_user_by_id(int(payload["sub"]))
+        user_id = int(payload["sub"])
+        user = db.get_user_by_id(user_id)
+        if not user or payload["ver"] != db.get_token_version(user_id):
+            return None
+        return user
     except (TypeError, ValueError):
         return None
 
@@ -279,31 +168,13 @@ _refresh_lock = threading.Lock()
 
 
 def _rollback_partial_snapshots(previous: set[str]) -> None:
-    """刷新失败时删掉本次新写入的快照，回退到上一版好快照。
-
-    ingest 先落采集快照、enrich 再补 jobProfiles；enrich 失败后最新快照是残缺版。
-    SNAPSHOT_KEEP=2，上一版仍在盘上。
-    """
-    written = [p for p in store.list_snapshots() if p.name not in previous]
-    removed: list[str] = []
-    for p in written:
-        try:
-            p.unlink(missing_ok=True)
-            removed.append(p.name)
-        except OSError as e:  # noqa: BLE001 单个文件删不掉不应掩盖原始异常
-            logger.warning("删除残缺快照失败 %s：%s", p.name, e)
-    if removed:
-        logger.warning(
-            "刷新失败，已回滚本次写入的残缺快照 %s，回退到上一版完整快照", "、".join(removed)
-        )
+    """兼容旧调用；刷新现在只在所有候选准备成功后提交，失败不再删除活动数据。"""
+    return None
 
 
 def _run_refresh() -> None:
-    """后台线程：跑一遍完整采集 + 富化管道；running 标志由路由持锁置位。"""
-    from . import enrich, ingest  # 惰性导入，避免循环依赖
-
-    # 本次运行开始前已存在的快照名，失败时据此回滚
-    previous_snapshots = {p.name for p in store.list_snapshots()}
+    """后台执行一次完整候选构建；ingest 内只有一个最终发布点。"""
+    from . import ingest
 
     def report(stage: str, pct: int) -> None:
         with _refresh_lock:
@@ -311,31 +182,21 @@ def _run_refresh() -> None:
             _refresh_state["progress"] = max(0, min(100, int(pct)))
 
     try:
-        # 阶段一：采集→清洗→抽取→组装→向量化→快照（0–85%）
-        def ingest_progress(stage: str, pct: int) -> None:
-            report(stage, int(pct * 0.85))
-
-        k, failed_jobs = ingest.main(use_crawler=True, progress=ingest_progress)
-
-        # 阶段二：岗位画像富化（85–100%）
-        def enrich_progress(stage: str, pct: int) -> None:
-            report(stage, 85 + int(pct * 0.15))
-
-        k, failed_profiles = enrich.enrich_snapshot(reindex=True, workers=4, progress=enrich_progress)
+        knowledge, failed_jobs = ingest.main(use_crawler=True, progress=report)
         with _refresh_lock:
             _refresh_state["result"] = {
-                "jobCount": len(k.get("jobs", []) or []),
-                "profileCount": len(k.get("jobProfiles") or {}),
+                "jobCount": len(knowledge.get("jobs") or []),
+                "profileCount": len(knowledge.get("jobProfiles") or {}),
                 "failedJobs": failed_jobs,
-                "failedProfiles": failed_profiles,
+                "failedProfiles": (knowledge.get("meta") or {}).get("failedProfiles") or [],
+                **((knowledge.get("meta") or {}).get("crawlStats") or {}),
             }
         report("刷新完成", 100)
-    except Exception as e:  # noqa: BLE001
-        _rollback_partial_snapshots(previous_snapshots)
+    except Exception as error:
+        logger.exception("数据刷新失败，继续提供上一版完整数据")
         with _refresh_lock:
-            _refresh_state["error"] = str(e)
+            _refresh_state["error"] = str(error)
     finally:
-        # 刷新重写了画像，清空缓存避免返回旧富文本
         _profile_cache.clear()
         with _refresh_lock:
             _refresh_state["running"] = False
@@ -346,6 +207,22 @@ def _run_refresh() -> None:
 def health() -> dict[str, Any]:
     k = load_knowledge()
     return {"ok": True, "jobCount": len(k.get("jobs", []) or [])}
+
+
+@app.get("/api/v1/data-status")
+def data_status() -> dict[str, Any]:
+    """公开已发布快照的数据性质；历史的 crawler 标签不能证明真实采集。"""
+    knowledge = load_knowledge()
+    meta = knowledge.get("meta") or {}
+    mode = meta.get("mode")
+    if mode not in ("real", "demo"):
+        mode = "demo" if meta.get("source") == "seed" else "unknown"
+    return {
+        "mode": mode,
+        "jobCount": len(knowledge.get("jobs") or []),
+        "archiveCount": (meta.get("crawlStats") or {}).get("archiveCount"),
+        "capabilityChangesKind": meta.get("capabilityChangesKind") or ("demo" if mode == "demo" else "unknown"),
+    }
 
 
 @app.get("/api/v1/jobs")
@@ -475,16 +352,17 @@ def auth_register(body: RegisterRequest) -> dict[str, Any]:
     user = db.create_user(username, password)
     if not user:
         raise HTTPException(status_code=400, detail="用户名已存在")
-    token = auth.create_token(int(user["id"]), user["username"])
+    token = auth.create_token(int(user["id"]), user["username"], token_version=0)
     return {"token": token, "user": user}
 
 
 @app.post("/api/v1/auth/login")
 def auth_login(body: LoginRequest) -> dict[str, Any]:
-    user = db.authenticate(body.username.strip(), body.password)
-    if not user:
+    authenticated = db.authenticate_with_token_version(body.username.strip(), body.password)
+    if authenticated is None:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
-    token = auth.create_token(int(user["id"]), user["username"])
+    user = authenticated.user
+    token = auth.create_token(int(user["id"]), user["username"], token_version=authenticated.token_version)
     return {"token": token, "user": user}
 
 
@@ -583,9 +461,12 @@ def profile_analyze(authorization: str | None = Header(default=None)) -> dict[st
     if result is None:
         raise HTTPException(status_code=502, detail="画像生成失败，请稍后重试")
     try:
-        db.save_ability_profile(int(user["id"]), result)
+        saved = db.save_ability_profile(int(user["id"]), result, expected_revision=user["analysisRevision"])
     except Exception as e:  # noqa: BLE001
-        print(f"[warn] 能力画像持久化失败：{e}")
+        logger.warning("能力画像持久化失败：%s", e)
+        raise HTTPException(status_code=503, detail="画像保存失败，请稍后重试") from e
+    if not saved:
+        raise HTTPException(status_code=409, detail="个人资料已更新，请重新生成画像")
     return result
 
 
@@ -612,16 +493,25 @@ def profile_clear(authorization: str | None = Header(default=None)) -> dict[str,
 def matching_analyze(body: MatchRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     # 凭据按鉴权 token 的用户解析；未登录则 llmStatus=no_api_key
     au = _current_user(authorization)
+    if authorization is not None and au is None:
+        raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
     credentials = settings.llm_credentials(au)
-    report = matching.build_match_report(body.jobId, body.user, credentials=credentials)
+    analysis_user = au if au is not None else body.user.model_dump()
+    report = matching.build_match_report(body.jobId, analysis_user, credentials=credentials)
     if report is None:
         raise HTTPException(status_code=404, detail="未找到目标岗位")
     # 仅当已登录才持久化；不信任 body.user.id（可伪造）
     if au is not None:
         try:
-            db.save_match_report(int(au["id"]), {"jobId": body.jobId, "report": report})
+            saved = db.save_match_report(
+                int(au["id"]), {"jobId": body.jobId, "report": report},
+                expected_revision=au["analysisRevision"],
+            )
         except Exception as e:  # noqa: BLE001
-            print(f"[warn] 匹配报告持久化失败：{e}")
+            logger.warning("匹配报告持久化失败：%s", e)
+            raise HTTPException(status_code=503, detail="匹配报告保存失败，请稍后重试") from e
+        if not saved:
+            raise HTTPException(status_code=409, detail="个人资料已更新，请重新生成匹配报告")
     return report
 
 
@@ -647,13 +537,10 @@ def matching_report_clear(authorization: str | None = Header(default=None)) -> d
 @app.get("/api/v1/jobs/{job_id}/profile")
 def job_profile(job_id: str) -> dict[str, Any]:
     """岗位画像（详情页富文本）：只读快照预生成结果；快照缺失返回 404（不再实时调 LLM）。"""
-    if job_id in _profile_cache:
-        return _profile_cache[job_id]
     k = load_knowledge()
     # 快照含预生成画像，直接返回
     profiles = k.get("jobProfiles") or {}
     if job_id in profiles:
-        _profile_cache[job_id] = profiles[job_id]
         return profiles[job_id]
     raise HTTPException(status_code=404, detail="该岗位暂无画像")
 
@@ -699,9 +586,12 @@ def admin_refresh_status(authorization: str | None = Header(default=None)) -> di
         return dict(_refresh_state)
 
 
-# 单容器部署：backend/dist 存在时托管前端构建产物（hash 路由，html=True 回退）
-_dist = config.BACKEND_ROOT / "dist"
-if _dist.is_dir():
-    from fastapi.staticfiles import StaticFiles
+for _candidate in [os.environ.get("FRONTEND_DIR"), "dist", "webapp"]:
+    if not _candidate:
+        continue
+    _dist = config.BACKEND_ROOT / _candidate
+    if _dist.is_dir():
+        from fastapi.staticfiles import StaticFiles
 
-    app.mount("/", StaticFiles(directory=str(_dist), html=True), name="spa")
+        app.mount("/", StaticFiles(directory=str(_dist), html=True), name="spa")
+        break

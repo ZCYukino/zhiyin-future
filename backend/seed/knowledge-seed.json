@@ -2,7 +2,9 @@
   "version": "2026-08-30T14:45:29",
   "meta": {
     "jobCount": 30,
-    "source": "crawler+llm",
+    "source": "seed",
+    "mode": "demo",
+    "capabilityChangesKind": "demo",
     "enriched": true,
     "jobProfiles": 30,
     "finalized": true

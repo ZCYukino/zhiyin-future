@@ -1,10 +1,12 @@
 // HTTP 客户端封装：统一 baseURL、token 注入、错误处理
+import { captureSession, expireSession } from './session'
 const BASE_URL: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) || 'http://localhost:8000/api/v1'
 
 /** 通用 GET/POST，失败抛错 */
 export async function http<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('zc_token')
+  const session = captureSession()
+  const token = session.token
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
@@ -13,6 +15,7 @@ export async function http<T>(path: string, options: RequestInit = {}): Promise<
 
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers })
   if (!res.ok) {
+    if (res.status === 401 && !['/auth/login', '/auth/register'].includes(path)) expireSession(session)
     let detail: unknown = ''
     try {
       const data = await res.json()

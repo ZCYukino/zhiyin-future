@@ -68,7 +68,7 @@
             </div>
           </transition>
           <el-dropdown trigger="hover" @command="handleUserCommand">
-            <span class="user-dropdown">
+            <span class="user-dropdown" aria-label="账号与个人档案">
               <el-avatar :size="32" class="user-avatar">
                 {{ (userStore.userInfo?.name || userStore.userInfo?.username || '?')[0] }}
               </el-avatar>
@@ -97,6 +97,11 @@
     </el-header>
 
     <el-main class="main-content" :class="{ 'no-header': !userStore.isLoggedIn }">
+      <div v-if="userStore.isLoggedIn" class="data-status-notice">
+        <el-alert :title="dataStatus.message.value" :type="dataStatus.status.value?.mode === 'real' && !dataStatus.loadFailed.value ? 'info' : 'warning'" :closable="false" show-icon>
+          <el-button v-if="dataStatus.loadFailed.value" size="small" :loading="dataStatus.loading.value" @click="dataStatus.load(true)">重试读取数据来源</el-button>
+        </el-alert>
+      </div>
       <div v-if="userStore.isLoggedIn" class="global-careers-layer">
         <div v-for="(item, index) in globalFloatingCareers" :key="index" class="global-career-drift" :style="item.driftStyle">
           <span class="global-career-word" :style="item.wordStyle">{{ item.name }}</span>
@@ -125,7 +130,7 @@
       </el-form>
       <template #footer>
         <el-button @click="passwordDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleChangePassword">确认修改</el-button>
+        <el-button type="primary" :loading="passwordSaving" @click="handleChangePassword">确认修改</el-button>
       </template>
     </el-dialog>
   </el-container>
@@ -138,11 +143,15 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { services } from '@/services'
 import { careerNames } from '@/models'
+import { captureSession, isCurrentSession } from '@/utils/session'
+import { useDataStatus } from '@/composables/useDataStatus'
 
 const userStore = useUserStore()
 const analysisStore = useAnalysisStore()
 const router = useRouter()
 const route = useRoute()
+const dataStatus = useDataStatus()
+watch(() => userStore.isLoggedIn, (loggedIn) => { if (loggedIn) dataStatus.load(true) }, { immediate: true })
 
 userStore.init()
 
@@ -151,13 +160,21 @@ let profileQueryStarted = false
 async function ensureProfileCheck() {
   if (!userStore.isLoggedIn || profileQueryStarted) return
   profileQueryStarted = true
+  const session = captureSession()
   try {
     await analysisStore.loadAbilityProfile()
   } finally {
-    profileChecked.value = true
+    if (isCurrentSession(session)) profileChecked.value = true
   }
 }
 watch(() => userStore.isLoggedIn, (v) => { if (v) ensureProfileCheck() }, { immediate: true })
+watch(() => userStore.isLoggedIn, (loggedIn) => {
+  if (loggedIn) return
+  profileChecked.value = false
+  profileQueryStarted = false
+  passwordDialogVisible.value = false
+  if (route.path !== '/login') router.replace('/login')
+})
 
 const showProfileBubble = computed(() =>
   userStore.isLoggedIn &&
@@ -190,6 +207,7 @@ const globalFloatingCareers = (() => {
 })()
 
 const passwordDialogVisible = ref(false)
+const passwordSaving = ref(false)
 const passwordForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
 
 function handleUserCommand(command: string) {
@@ -212,6 +230,7 @@ function handleUserCommand(command: string) {
 }
 
 async function handleChangePassword() {
+  if (passwordSaving.value) return
   if (!passwordForm.oldPassword || !passwordForm.newPassword) {
     ElMessage.warning('请填写完整信息')
     return
@@ -224,12 +243,19 @@ async function handleChangePassword() {
     ElMessage.warning('新密码至少 6 位')
     return
   }
+  const session = captureSession()
   try {
+    passwordSaving.value = true
     await services.changePassword(passwordForm.oldPassword, passwordForm.newPassword)
-    ElMessage.success('密码修改成功')
+    if (!isCurrentSession(session)) return
+    userStore.logout()
+    await router.replace('/login')
+    ElMessage.success('密码修改成功，请重新登录')
     passwordDialogVisible.value = false
   } catch (err: any) {
-    ElMessage.error(err?.message || '密码修改失败')
+    if (isCurrentSession(session)) ElMessage.error(err?.message || '密码修改失败')
+  } finally {
+    passwordSaving.value = false
   }
 }
 </script>
@@ -348,6 +374,7 @@ body {
 
 .menu {
   flex: 1;
+  min-width: 0;
   margin: 0 24px;
   border-bottom: none !important;
   background: transparent !important;
@@ -579,6 +606,11 @@ body {
   overflow: hidden;
   background: #f4e9d6;
 }
+.data-status-notice {
+  position: relative;
+  z-index: 2;
+  padding: 12px 24px 0;
+}
 
 .main-content.no-header {
   min-height: 100vh;
@@ -630,5 +662,18 @@ body {
 .page-fade-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+
+@media (max-width: 720px) {
+  .logo {
+    margin-left: 10px;
+    margin-right: 8px;
+    padding: 5px 8px;
+    gap: 6px;
+  }
+  .logo-cn { font-size: 14px; letter-spacing: 2px; }
+  .logo-en, .user-name-box, .profile-bubble { display: none; }
+  .menu { margin: 0 4px; }
+  .user-info { margin-right: 8px; }
 }
 </style>

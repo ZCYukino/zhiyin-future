@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import html
+import hashlib
 from collections import Counter
 from difflib import SequenceMatcher
 
@@ -43,6 +45,10 @@ DISTRICT_TO_CITY = {
 
 def denoise(text: str) -> str:
     """按行剔除模板噪声。"""
+    text = html.unescape(re.sub(r"</?(?:p|div|li|br|h[1-6])\b[^>]*>", "\n", text, flags=re.I))
+    text = re.sub(r"<[^>]+>", "", text)
+    # 一行可能混写职责与福利，先按句拆分
+    text = re.sub(r"[；;。]", "。\n", text)
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     out: list[str] = []
     for ln in lines:
@@ -59,17 +65,20 @@ def _similarity(a: str, b: str) -> float:
 
 
 def deduplicate(jobs: list[RawJob], threshold: float = 0.85) -> list[RawJob]:
-    """基于描述文本相似度去重。"""
-    unique: list[RawJob] = []
+    """按来源岗位身份去重；不同雇主/URL 的同模板 JD 仍是独立招聘样本。"""
+    unique: dict[str, RawJob] = {}
     for j in jobs:
-        dup = False
-        for u in unique:
-            if _similarity(j.description, u.description) >= threshold:
-                dup = True
-                break
-        if not dup:
-            unique.append(j)
-    return unique
+        key = job_identity(j)
+        unique[key] = j
+    return list(unique.values())
+
+
+def job_identity(job: RawJob) -> str:
+    """URL 仅在同来源内作为身份；没有 URL 时退到标题、公司、城市和完整正文。"""
+    if job.url:
+        return f"{job.source}|{job.url}"
+    content = "|".join((job.title, str((job.extra or {}).get("company") or ""), job.city, job.description))
+    return f"{job.source}|sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}"
 
 
 def normalize_city(city: str) -> str:
@@ -77,6 +86,13 @@ def normalize_city(city: str) -> str:
     c = (city or "").strip()
     if not c:
         return ""
+    # 来源给出完整层级时优先用显式市名
+    parts = [part.strip() for part in re.split(r"[-/>—]", c) if part.strip()]
+    if len(parts) > 1:
+        explicit_city = next((part for part in parts if part.endswith("市") or part in ("北京", "上海", "天津", "重庆")), None)
+        if explicit_city:
+            return explicit_city.removesuffix("市")
+        c = parts[-1]
     # 省 / 自治区 → 高于市级，丢弃
     if c.endswith(("省", "自治区")):
         return ""

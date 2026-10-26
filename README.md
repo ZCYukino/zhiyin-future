@@ -92,22 +92,16 @@ ADMIN_PASSWORD=123456   # 初始密码（仅首次创建账号时使用）
 
 > 说明：修改 `.env` 只影响管理员账号，不影响数据库里其他已注册的普通用户。
 
-## 测试与验证
+## 构建验证
 
 ```bash
-# 后端（163 个用例，覆盖匹配判定 / 采集流水线 / 鉴权 / 配置等）
-cd backend
-pip install -r requirements-dev.txt
-python -m pytest --cov=app --cov-report=term -p no:cacheprovider
-
-# 前端（构建 + 类型检查）
-cd ../zcFrontend
+cd zcFrontend
 npm install
-npx vite build
-npx vue-tsc --noEmit
-```
+npm run build          # vue-tsc 类型检查 + vite 打包
 
-后端单元测试的行覆盖率约 81%（口径见 `backend/tests/README.md`，`.coveragerc` 排除了需真实网络 / 向量库的基础设施模块）。
+cd ../backend
+python -m compileall app
+```
 
 ## 目录结构
 
@@ -134,8 +128,7 @@ npx vue-tsc --noEmit
 FastAPI 在线服务（基路径 /api/v1）→ 前端按需读取最新快照
 ```
 
-> 顺序是有意的：**先落盘快照、再重建向量**——向量库绝不能比被服务的快照更新，否则
-> RAG 会检索到快照里根本不存在的内容；反过来（快照新、向量旧）只是检索略滞后，可接受。
+快照先落盘、再重建向量库，保证检索内容不会超出当前服务的快照版本。
 
 | 环节 | 失败时行为 |
 |---|---|

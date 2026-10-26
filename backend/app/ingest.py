@@ -1,23 +1,24 @@
-"""离线采集管道：爬虫 → 清洗 → LLM 抽取 → 组装知识库 → 向量化 → 快照落盘。
-
-用法：python -m backend.ingest
-（手动触发；不跑时前端照常读上次快照）
-"""
+"""离线采集管道：爬虫 → 清洗 → LLM 抽取 → 组装知识库 → 向量化 → 快照落盘。"""
 from __future__ import annotations
 
 import json
 import logging
 import re
+import copy
+import hashlib
+import math
+import uuid
+import os
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Callable
 
 from . import config, settings, store
-from .clean import clean_pipeline, cross_validate_skills
+from .clean import clean_pipeline, cross_validate_skills, job_identity
 from .crawler.base import RawJob
 from .crawler.sources import CRAWLERS
-from .extract import CATEGORY_IDS, CATEGORY_NAMES, _infer_stack, extract_job, generate_capability_change, generate_job_definition
+from .extract import CATEGORY_DESC, CATEGORY_IDS, CATEGORY_NAMES, _infer_stack, extract_job, generate_capability_change, generate_job_definition
 from .llm import LLMNotConfigured, embed
 from .seed import SEED_KEYWORDS, SEED_RAW_JOBS
 
@@ -25,31 +26,52 @@ logger = logging.getLogger("ingest")
 
 # 清洗后 JD 的累积存档（跨轮去重）
 JD_ARCHIVE_PATH = config.DATA_DIR / "raw_jds" / "jd_archive.json"
+EXTRACTION_CACHE_PATH = config.DATA_DIR / "raw_jds" / "extractions.json"
 
 
-def archive_jds(cleaned: list[RawJob]) -> int:
+def _write_json(path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _read_archive() -> list[dict[str, Any]]:
+    if not JD_ARCHIVE_PATH.exists():
+        return []
+    data = json.loads(JD_ARCHIVE_PATH.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+        raise RuntimeError("JD 累计存档格式错误，已停止刷新以保护既有数据")
+    return data["items"]
+
+
+def _raw_from_archive(item: dict[str, Any]) -> RawJob:
+    return RawJob(title=item["title"], description=item["description"], city=item.get("city") or "",
+        salary=item.get("salary") or "", salary_min=item.get("salaryMin"), salary_max=item.get("salaryMax"),
+        source=item.get("source") or "", url=item.get("url") or "", published_at=item.get("publishedAt"),
+        extra=item.get("extra") or {"company": item.get("company") or ""})
+
+
+def load_archived_jobs() -> list[RawJob]:
+    # 演示种子不计入真实招聘证据
+    return [_raw_from_archive(item) for item in _read_archive() if item.get("source") not in ("", "seed")]
+
+
+def archive_jds(cleaned: list[RawJob], stats: dict[str, Any] | None = None) -> int:
     """把本轮清洗后的 JD 追加进累积存档（按 URL / 标题+正文指纹去重），返回存档总条数。"""
-    JD_ARCHIVE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    archive: dict[str, Any] = {"version": 1, "updatedAt": "", "items": []}
-    if JD_ARCHIVE_PATH.exists():
-        try:
-            archive = json.loads(JD_ARCHIVE_PATH.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            logger.warning("JD 存档损坏，重建：%s", JD_ARCHIVE_PATH)
-    items: list[dict[str, Any]] = archive.get("items", [])
-    seen: set[str] = {it.get("_key", "") for it in items}
-
-    added = 0
+    items = _read_archive()
+    indexed = {job_identity(_raw_from_archive(item)): item for item in items}
+    added = updated = 0
     now = datetime.now().isoformat(timespec="seconds")
     for j in cleaned:
-        key = j.url or f"{j.source}|{j.title}|{j.description[:80]}"
-        if key in seen:
-            continue
-        seen.add(key)
-        added += 1
-        items.append({
+        key = job_identity(j)
+        previous = indexed.get(key)
+        value = {
             "_key": key,
-            "id": f"jd-{len(items) + 1:04d}",
+            "id": (previous or {}).get("id") or f"jd-{uuid.uuid4().hex}",
             "title": j.title,
             "description": j.description,
             "city": j.city,
@@ -59,16 +81,20 @@ def archive_jds(cleaned: list[RawJob]) -> int:
             "source": j.source,
             "url": j.url,
             "company": (j.extra or {}).get("company", ""),
-            "collectedAt": now,
-        })
-
-    archive["version"] = 1
-    archive["updatedAt"] = now
-    archive["items"] = items
-    tmp = JD_ARCHIVE_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(archive, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(JD_ARCHIVE_PATH)
-    logger.info("JD 存档：本轮新增 %d 条，累计 %d 条 → %s", added, len(items), JD_ARCHIVE_PATH)
+            "publishedAt": j.published_at,
+            "extra": copy.deepcopy(j.extra),
+            "collectedAt": (previous or {}).get("collectedAt") or now,
+            "lastSeenAt": now,
+        }
+        if previous is None:
+            added += 1
+        elif any(previous.get(field) != value[field] for field in ("title", "description", "city", "salary", "salaryMin", "salaryMax", "publishedAt", "extra")):
+            updated += 1
+        indexed[key] = value
+    items = list(indexed.values())
+    _write_json(JD_ARCHIVE_PATH, {"version": 2, "updatedAt": now, "items": items})
+    if stats is not None:
+        stats.update(newCount=added, updatedCount=updated, archiveCount=len([x for x in items if x.get("source") not in ("", "seed")]))
     return len(items)
 
 # 垂直晋升阶梯（lower→upper），名字须与快照 jobs[].name 一致
@@ -89,23 +115,46 @@ JOB_LADDERS: list[tuple[str, str]] = [
 ]
 
 
-def collect_raw(use_crawler: bool = True, limit_per_kw: int = 5) -> list[RawJob]:
-    """采集原始 JD：先爬虫，失败/空结果则降级到种子数据。"""
+def collect_raw(use_crawler: bool = True, limit_per_kw: int = 50, stats: dict[str, Any] | None = None) -> list[RawJob]:
+    """单次有界采样；真实来源无结果时报错，种子仅能显式用于离线演示。"""
     raw: list[RawJob] = []
+    stats = stats if stats is not None else {}
+    max_pages = max(1, min(100, int(os.getenv("CRAWL_MAX_PAGES", "5"))))
+    limit_per_kw = max(1, min(1000, int(os.getenv("CRAWL_LIMIT_PER_KEYWORD", str(limit_per_kw)))))
+    stats.update(sourceCounts={}, failedSources=[], sampled=True, maxPages=max_pages, limitPerKeyword=limit_per_kw)
     if use_crawler:
         for name, cls in CRAWLERS.items():
             crawler = cls()
+            source_raw: list[RawJob] = []
             keywords = getattr(crawler, "KEYWORDS", None) or SEED_KEYWORDS
             for kw in keywords:
                 try:
                     before = len(raw)
-                    raw.extend(crawler.crawl(kw, limit=limit_per_kw))
+                    rows = crawler.crawl(kw, limit=limit_per_kw, pages=max_pages)
+                    source_raw.extend(rows)
+                    raw.extend(rows)
+                    for error in getattr(crawler, "errors", []):
+                        message = f"{name}: {error}"
+                        if message not in stats["failedSources"]:
+                            stats["failedSources"].append(message)
+                    if getattr(crawler, "errors", []) and not rows:
+                        break
                     logger.info("爬虫 %s 关键词 %s 获取 %d 条", name, kw, len(raw) - before)
                 except Exception as e:  # noqa: BLE001
-                    logger.warning("爬虫 %s 关键词 %s 失败：%s", name, e)
-    if not raw:
-        logger.info("爬虫无结果，降级到内置种子数据 %d 条", len(SEED_RAW_JOBS))
-        raw = list(SEED_RAW_JOBS)
+                    logger.warning("爬虫 %s 关键词 %s 失败：%s", name, kw, e)
+                    message = f"{name}: {type(e).__name__}"
+                    if message not in stats["failedSources"]:
+                        stats["failedSources"].append(message)
+                    break  # 来源不可用时不为每个关键词重复打满重试
+            stats["sourceCounts"][name] = len(source_raw)
+            if not source_raw and not any(x.startswith(f"{name}:") for x in stats["failedSources"]):
+                stats["failedSources"].append(f"{name}: 未获取到匹配岗位")
+    else:
+        raw = copy.deepcopy(SEED_RAW_JOBS)
+        stats["sourceCounts"] = {"seed": len(raw)}
+    stats["rawCount"] = len(raw)
+    if use_crawler and not raw:
+        raise RuntimeError("真实招聘数据采集失败，已保留上一版数据；" + "；".join(stats["failedSources"]))
     return raw
 
 
@@ -142,20 +191,60 @@ def _extract_one(raw: RawJob) -> dict[str, Any] | None:
     except Exception as e:  # noqa: BLE001
         logger.warning("LLM 抽取失败（跳过该岗位）%s：%s", raw.title, e)
         return None
-    if not d or not d.get("name") or not (d.get("mustSkills") or d.get("bonusSkills")):
+    if not isinstance(d, dict) or not isinstance(d.get("name"), str) or not d["name"].strip():
+        return None
+    d = copy.deepcopy(d)
+    for field in ("mustSkills", "bonusSkills", "duties"):
+        value = d.get(field, [])
+        if not isinstance(value, list) or any(not isinstance(s, str) or not s.strip() for s in value):
+            return None
+        d[field] = list(dict.fromkeys(s.strip() for s in value))
+    if d.get("categoryId") not in CATEGORY_IDS:
+        return None
+    for field in ("education", "experience"):
+        if d.get(field) is not None and not isinstance(d[field], str):
+            return None
+    for field in ("salaryMin", "salaryMax"):
+        value = d.get(field)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
+            return None
+    if not (d.get("mustSkills") or d.get("bonusSkills")):
         logger.warning("LLM 抽取不完整（跳过该岗位）：%s", raw.title)
         return None
-    if raw.city and "city" not in d:
-        d["_city"] = raw.city
-    d["_city"] = d.get("_city") or raw.city
-    d["_source"] = d.get("_source") or raw.source
+    # 薪资以来源的明确数值为准，面议/缺失时不能采用模型猜测的区间。
+    d["salaryMin"], d["salaryMax"] = _normalize_salary(raw.salary_min, raw.salary_max)
+    d["name"] = d["name"].strip()
+    d.update(_city=raw.city, _source=raw.source, _url=raw.url, _publishedAt=raw.published_at,
+             _extra=copy.deepcopy(raw.extra), _rawDescription=raw.description)
     return d
+
+
+def _extraction_key(raw: RawJob) -> str:
+    from .prompts import EXTRACT_PROMPT
+    # 正文与配置/提示词变更才重新付费；首次/末次采集时间不参与哈希。
+    data = {"job": raw.to_dict(), "prompt": EXTRACT_PROMPT, "model": config.LLM_MODEL,
+            "baseUrl": config.LLM_BASE_URL, "categories": CATEGORY_DESC, "schema": 3}
+    return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _pipeline_fingerprint(raw_jobs: list[RawJob]) -> str:
+    """比较已发布版本的完整证据与模型输入，不能用本轮存档增量代表发布状态。"""
+    from .prompts import JOB_PROFILE_PROMPT
+    data = {
+        "extractions": sorted(_extraction_key(raw) for raw in raw_jobs),
+        "profilePrompt": JOB_PROFILE_PROMPT,
+        "embedding": {"model": config.EMBEDDING_MODEL, "baseUrl": config.DASHSCOPE_BASE_URL,
+                      "dimensions": config.EMBEDDING_DIM},
+        "schema": 1,
+    }
+    return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def extract_all(
     raw_jobs: list[RawJob],
     progress: Callable[[int, int], None] | None = None,
     workers: int = 8,
+    stats: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """LLM 结构化抽取（并发）；失败岗位跳过并记录。返回 (结果, 失败岗位名列表)。"""
     n = len(raw_jobs)
@@ -164,17 +253,52 @@ def extract_all(
     out: list[dict[str, Any] | None] = [None] * n
     failed: list[str] = []
     done = 0
+    cache: dict[str, Any] = {}
+    if EXTRACTION_CACHE_PATH.exists():
+        try:
+            loaded = json.loads(EXTRACTION_CACHE_PATH.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                cache = loaded
+        except (ValueError, OSError):
+            logger.warning("结构化抽取缓存不可读，本轮重新抽取")
+    keys = [_extraction_key(raw) for raw in raw_jobs]
+    pending = []
+    for i, key in enumerate(keys):
+        if isinstance(cache.get(key), dict):
+            # 命中旧正文也要刷新其使用顺序
+            cached = cache.pop(key)
+            cache[key] = cached
+            out[i] = copy.deepcopy(cached)
+            done += 1
+        else:
+            pending.append(i)
+    if stats is not None:
+        stats["reusedCount"] = done
+        stats["retainedExtractionCount"] = 0
+    last_success = {(entry.get("_source"), entry.get("_url")): entry for entry in cache.values()
+                    if isinstance(entry, dict) and entry.get("_url")}
     with ThreadPoolExecutor(max_workers=min(workers, n)) as ex:
-        futs = {ex.submit(_extract_one, raw): i for i, raw in enumerate(raw_jobs)}
+        futs = {ex.submit(_extract_one, raw_jobs[i]): i for i in pending}
         for fut in as_completed(futs):
             i = futs[fut]
             res = fut.result()  # LLMNotConfigured 在此向上抛
             if res is None:
                 failed.append(raw_jobs[i].title)
+                raw = raw_jobs[i]
+                previous_result = last_success.get((raw.source, raw.url)) if raw.url else None
+                if previous_result:
+                    # 只复用旧正文对应的旧抽取，不能把旧技能伪装为新正文的提取结果。
+                    res = copy.deepcopy(previous_result)
+                    if stats is not None:
+                        stats["retainedExtractionCount"] += 1
+            else:
+                cache[keys[i]] = copy.deepcopy(res)
             out[i] = res
             done += 1
             if progress:
                 progress(done, n)
+    # 只缓存成功输出；失败样本下一次重试，不把失败固定下来。
+    _write_json(EXTRACTION_CACHE_PATH, cache)
     return [d for d in out if d is not None], failed
 
 
@@ -206,24 +330,16 @@ def normalize_education(edu: str) -> str:
     for key, canon in (("博士", "博士及以上"), ("硕士", "硕士及以上"), ("本科", "本科及以上"), ("大专", "大专及以上")):
         if key in e:
             return canon
-    # 未识别的表述原样返回，不臆造学历
+    # 未识别的表述原样返回
     return e
 
 
 def _normalize_salary(lo: float | None, hi: float | None) -> tuple[float | None, float | None]:
-    """清洗薪资区间：取整、修正退化/倒挂区间、钳制到合理边界；任一端缺失即 (None, None)。"""
-    if lo is None or hi is None:
+    """保留来源中的真实金额；缺失、非有限、非正或倒挂的区间留空。"""
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           or not math.isfinite(value) or value <= 0 for value in (lo, hi)):
         return None, None
-    lo = round(lo)
-    hi = round(hi)
-    if lo <= 0 or hi <= 0:
-        return None, None
-    if hi <= lo:
-        hi = round(lo * 1.3)
-    # 上限留 1K 余量，先钳 lo 再钳 hi 并保证 hi ≥ lo+1
-    lo = max(3, min(lo, 79))
-    hi = max(lo + 1, min(hi, 80))
-    return lo, hi
+    return (lo, hi) if lo <= hi else (None, None)
 
 
 def _aggregate(extracted: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -262,6 +378,8 @@ def _aggregate(extracted: list[dict[str, Any]]) -> list[dict[str, Any]]:
             c for d in items if (c := (d.get("_city") or "").strip())
         )
         city_dist = [{"city": c, "count": cnt} for c, cnt in city_counter.most_common(3)]
+        companies = {str((d.get("_extra") or {}).get("company") or "").strip() for d in items}
+        companies.discard("")
         out.append(
             {
                 "name": name,
@@ -274,8 +392,13 @@ def _aggregate(extracted: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "salaryMin": salary_min,
                 "salaryMax": salary_max,
                 "cityDistribution": city_dist,
-                "companyCount": None,  # 无数据源，前端显示「—」
+                "companyCount": len(companies) if companies else None,
                 "sampleCount": n,
+                "_source": "、".join(sorted({d.get("_source") for d in items if d.get("_source")})),
+                "evidence": [{"source": d.get("_source"), "url": d.get("_url"),
+                              "publishedAt": d.get("_publishedAt"), "company": (d.get("_extra") or {}).get("company", "")}
+                             for d in items if d.get("_source") not in (None, "", "seed")],
+                "rawDescriptions": [d.get("_rawDescription") or "" for d in items],
             }
         )
     return out
@@ -337,20 +460,12 @@ def _discover_one(cand: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def discover_new_job_defs(workers: int = 5) -> list[dict[str, Any]]:
-    """用 LLM 为新兴岗位生成规范定义（并发），返回可并入聚合结果的标准条目（低置信度剔除）。"""
-    if not NEW_JOB_CANDIDATES:
-        return []
-    with ThreadPoolExecutor(max_workers=min(workers, len(NEW_JOB_CANDIDATES))) as ex:
-        results = list(ex.map(_discover_one, NEW_JOB_CANDIDATES))
-    return [d for d in results if d is not None]
+    """固定人工候选不能证明存在真实招聘，默认不再自动生成或发布。"""
+    return []
 
 
 def recent_periods(now: datetime | None = None) -> tuple[str, str]:
-    """按当前日期计算「最近两个半年」的周期标签 (较早期, 较近期)。
-
-    例如 2026-08（下半年）→ ("2026上半年", "2026下半年")；
-        2026-03（上半年）→ ("2025下半年", "2026上半年")。
-    """
+    """按当前日期计算「最近两个半年」的周期标签 (较早期, 较近期)。"""
     now = now or datetime.now()
     year = now.year
     if now.month <= 6:
@@ -416,12 +531,17 @@ def generate_capability_changes(
 def build_knowledge(
     extracted: list[dict[str, Any]],
     progress: Callable[[int, int], None] | None = None,
+    previous: dict[str, Any] | None = None,
+    infer_changes: bool = True,
 ) -> dict[str, Any]:
     """把抽取结果组装成对齐前端结构的知识库 JSON。progress(done, total) 在能力演化阶段回调。"""
     aggregated = _aggregate(extracted)
     # LLM 生成新兴岗位定义，追加到聚合结果统一组装
     n_old = len(aggregated)
-    aggregated.extend(discover_new_job_defs())
+    existing_names = {d["name"] for d in aggregated}
+    aggregated.extend(d for d in discover_new_job_defs() if d["name"] not in existing_names)
+    old_ids = {j["name"]: str(j["id"]) for j in (previous or {}).get("jobs", [])}
+    old_jobs = {j["name"]: j for j in (previous or {}).get("jobs", [])}
 
     jobs: list[dict[str, Any]] = []
     must_bonus: dict[str, tuple[list[str], list[str]]] = {}
@@ -429,11 +549,13 @@ def build_knowledge(
     today = datetime.now().strftime("%Y-%m-%d")
 
     for idx, d in enumerate(aggregated, start=1):
-        jid = str(idx)
+        jid = old_ids.get(d["name"]) or "j-" + hashlib.sha256(d["name"].encode("utf-8")).hexdigest()[:20]
         skills = (d["mustSkills"] or []) + (d["bonusSkills"] or [])
         must_bonus[jid] = (d["mustSkills"], d["bonusSkills"])
         duties = d["duties"] or []
-        is_new = idx > n_old
+        prior_job = old_jobs.get(d["name"]) or {}
+        is_new = bool(prior_job.get("isNew")) or idx > n_old or (bool(previous) and d["name"] not in old_ids and bool(d.get("evidence")))
+        discovery_date = prior_job.get("discoveredDate") or today
         jobs.append(
             {
                 "id": jid,
@@ -447,29 +569,32 @@ def build_knowledge(
                 # 热度：老岗位由样本数派生，新岗位无样本依据留 None
                 "hotScore": None if is_new else min(60 + d["sampleCount"] * 8, 99),
                 "isNew": is_new,
-                "source": d.get("_source") if is_new else None,
+                "source": d.get("_source") or None,
                 "confidence": d.get("_confidence") if is_new else None,
-                "discoveredDate": today if is_new else None,
+                "discoveredDate": discovery_date if is_new else None,
                 "companyCount": d.get("companyCount"),
                 "trend": None,  # 无趋势数据源，不编造
                 "skills": skills,
+                "observedSkills": list(dict.fromkeys(skills)) if d.get("evidence") else None,
                 "cityDistribution": d["cityDistribution"],
+                "sampleCount": d["sampleCount"],
+                "evidence": d.get("evidence") or [],
             }
         )
         if is_new:
             discovery_log.append(
                 {
-                    "date": today,
+                    "date": discovery_date,
                     "jobName": d["name"],
                     "jobId": jid,
                     "source": d.get("_source") or "多源数据挖掘",
-                    "confidence": d.get("_confidence") or 0.6,
+                    "confidence": d.get("_confidence"),
                     "description": d.get("_summary") or (duties[0] if duties else ""),
                 }
             )
 
     # 能力演化记录：LLM 生成，失败的岗位无轨迹
-    capability_changes = generate_capability_changes(jobs, must_bonus, progress=progress)
+    capability_changes = generate_capability_changes(jobs, must_bonus, progress=progress) if infer_changes else []
 
     return {
         "version": datetime.now().isoformat(timespec="seconds"),
@@ -488,6 +613,10 @@ def build_knowledge(
         "jobIntro": {
             jid: {"duties": d["duties"], "scenarios": d.get("_scenarios") or []}
             for jid, d in zip((j["id"] for j in jobs), aggregated)
+        },
+        "jobEvidence": {
+            job["id"]: [{**evidence, "text": text} for evidence, text in zip(d.get("evidence") or [], d.get("rawDescriptions") or [])]
+            for job, d in zip(jobs, aggregated)
         },
         "jobSkillProgression": {
             jid: _skill_levels(must_bonus[jid][0], must_bonus[jid][1]) for jid in must_bonus
@@ -595,6 +724,7 @@ def build_graph(
                     "label": "核心",
                     "weight": 2,
                     "relation": "core",
+                    "evidenceKind": (j.get("skillEvidence") or {}).get(s, "unverified"),
                 }
             )
         for s in bonus:
@@ -605,6 +735,7 @@ def build_graph(
                     "label": "加分",
                     "weight": 1,
                     "relation": "optional",
+                    "evidenceKind": (j.get("skillEvidence") or {}).get(s, "unverified"),
                 }
             )
     # 垂直晋升 + 横向换岗的 job→job 边
@@ -612,7 +743,7 @@ def build_graph(
     return {"nodes": nodes, "edges": edges}
 
 
-def index_vectors(knowledge: dict[str, Any]) -> None:
+def index_vectors(knowledge: dict[str, Any]) -> str | None:
     """把岗位知识片段 embedding 写入 ChromaDB（供 RAG 检索）；jobs 为空时不重建集合。"""
     jobs = knowledge.get("jobs", []) or []
     if not jobs:
@@ -643,67 +774,108 @@ def index_vectors(knowledge: dict[str, Any]) -> None:
         ids.append(jid)
         texts.append(text)
         metas.append({"source": f"job-{jid}", "name": j["name"]})
-    # text-embedding-v3 单次 batch 上限 10；全部算完才重建集合，embed 失败不动旧索引
+        for number, evidence in enumerate((knowledge.get("jobEvidence") or {}).get(jid) or []):
+            raw_text = evidence.get("text") or ""
+            if not raw_text:
+                continue
+            for offset in range(0, len(raw_text), 1800):
+                ids.append(f"{jid}-jd-{number}-{offset}")
+                texts.append(raw_text[offset:offset + 1800])
+                metas.append({"source": evidence.get("source") or "", "url": evidence.get("url") or "",
+                              "publishedAt": evidence.get("publishedAt") or "", "jobId": jid, "kind": "recruitment", "name": j["name"]})
     embs: list[list[float]] = []
     for start in range(0, len(texts), 10):
         embs.extend(embed(texts[start:start + 10], credentials=settings.embed_credentials()))
-    store.reset_collection()
-    store.upsert_fragments(ids, texts, metas, embs)
+    if len(embs) != len(ids) or any(not row or any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in row) for row in embs):
+        raise RuntimeError("向量模型返回数量或格式不完整，未发布本轮数据")
+    collection_name = "jd_fragments_v_" + uuid.uuid4().hex
+    try:
+        store.create_vector_collection(collection_name)
+        store.upsert_fragments(ids, texts, metas, embs, collection_name=collection_name)
+    except Exception:
+        try:
+            store.delete_vector_collection(collection_name)
+        except Exception:
+            logger.warning("未发布向量集合清理失败：%s", collection_name)
+        raise
     logger.info("已向量化 %d 条岗位片段", len(ids))
+    return collection_name
+
+
+def publish_knowledge(knowledge: dict[str, Any]) -> None:
+    """准备不可变向量集合，再原子提交包含集合名的完整快照。"""
+    collection_name = index_vectors(knowledge)
+    if not collection_name:
+        raise RuntimeError("没有可发布的向量数据，已保留旧版本")
+    knowledge.setdefault("meta", {})["vectorCollection"] = collection_name
+    try:
+        store.save_snapshot(knowledge)
+    except Exception:
+        try:
+            store.delete_vector_collection(collection_name)
+        except Exception:
+            logger.warning("未发布集合清理失败：%s", collection_name)
+        raise
 
 
 def main(
     use_crawler: bool = True,
     progress: Callable[[str, int], None] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    from .enrich import enrich_knowledge
 
     def report(stage: str, pct: int) -> None:
-        logger.info("进度 %s：%d%%", stage, pct)
         if progress:
             progress(stage, pct)
 
-    logger.info("=== 开始离线采集 ===")
+    previous = store.load_latest_snapshot() or {}
+    stats: dict[str, Any] = {}
     report("采集原始 JD", 3)
-    # 单轮有效 JD 目标 ≥100 条
-    raw = collect_raw(use_crawler=use_crawler, limit_per_kw=10)
+    raw = collect_raw(use_crawler=use_crawler, stats=stats)
+    stats["rawCount"] = len(raw)
+    stats["duplicateCount"] = len(raw) - len({job_identity(job) for job in raw})
     report("清洗数据", 18)
     cleaned = clean_pipeline(raw)
-    logger.info("清洗后 %d 条 JD", len(cleaned))
-    try:
-        archive_jds(cleaned)
-    except Exception as e:  # noqa: BLE001 存档失败不阻断主管线
-        logger.warning("JD 存档失败：%s", e)
-    report("LLM 结构化抽取", 30)
-    extracted, failed_jobs = extract_all(
-        cleaned,
-        progress=lambda done, total: report("LLM 结构化抽取", 30 + int(done / total * 27)),
-    )
-    if failed_jobs:
-        logger.warning("本轮 %d 个岗位 LLM 抽取失败被跳过：%s", len(failed_jobs), "、".join(failed_jobs))
-    logger.info("抽取完成 %d 个岗位", len(extracted))
-    report("组装知识库", 60)
-    knowledge = build_knowledge(
-        extracted,
-        progress=lambda done, total: report("组装知识库", 60 + int(done / total * 13)),
-    )
-    # 零产出保护：Key 失效时 extract_all 返回空，继续走会清空向量库并写入空快照；
-    # 这里抛错，刷新状态里管理员能看到原因
+    stats["cleanedCount"] = len(cleaned)
+    if not cleaned:
+        raise RuntimeError("本轮真实招聘数据清洗后无有效 JD，已保留上一版数据")
+    # 存档保留原始证据，供下次重试
+    archive_jds(cleaned, stats=stats)
+    cumulative = load_archived_jobs() if use_crawler else cleaned
+    pipeline_fingerprint = _pipeline_fingerprint(cumulative)
+    previous_meta = previous.get("meta") or {}
+    if (use_crawler and previous_meta.get("mode") == "real" and previous_meta.get("vectorCollection")
+            and previous_meta.get("skillEvidenceVersion") == 1
+            and not previous_meta.get("failedJobs") and not previous_meta.get("failedProfiles")
+            and previous_meta.get("pipelineFingerprint") == pipeline_fingerprint):
+        knowledge = copy.deepcopy(previous)
+        stats.update(unchanged=True, reusedCount=stats["archiveCount"])
+        knowledge["meta"]["crawlStats"] = stats
+        report("刷新完成", 100)
+        return knowledge, []
+    report("LLM 结构化抽取", 25)
+    extracted, failed_jobs = extract_all(cumulative, stats=stats,
+        progress=lambda done, total: report("LLM 结构化抽取", 25 + int(done / total * 30)))
     if not extracted:
-        raise RuntimeError(
-            f"本轮未抽取到任何岗位（{len(cleaned)} 条 JD 全部失败），已保留原有数据，未写入新快照"
-        )
+        raise RuntimeError(f"本轮未抽取到任何岗位（{len(cumulative)} 条 JD），已保留原有数据")
+    report("组装知识库", 58)
+    knowledge = build_knowledge(extracted, previous=previous, infer_changes=False)
     if not knowledge.get("jobs"):
-        raise RuntimeError(
-            f"本轮组装结果为空（{len(cleaned)} 条 JD 抽取后未形成任何岗位），已保留原有数据，未写入新快照"
-        )
-    # 先落盘快照、再重建向量：向量库不能比被服务的快照新
-    report("快照落盘", 75)
-    path = store.save_snapshot(knowledge)
-    report("向量化索引", 92)
-    index_vectors(knowledge)
-    logger.info("=== 采集完成，快照：%s ===", path.name)
-    report("采集完成", 100)
+        raise RuntimeError("本轮未形成任何岗位，已保留原有数据")
+    knowledge["meta"].update(source="crawler+llm" if use_crawler else "seed+llm",
+        mode="real" if use_crawler else "demo", crawlStats=stats,
+        pipelineFingerprint=pipeline_fingerprint,
+        capabilityChangesKind="unavailable", failedJobs=failed_jobs, failedProfiles=[])
+    # 演化不能由当前技能反推成历史事实；真实历史样本不足时明确无记录。
+    report("岗位画像富化", 62)
+    knowledge, failed_profiles = enrich_knowledge(knowledge, previous=previous,
+        progress=lambda stage, pct: report(stage, 62 + int(pct * 0.24)))
+    knowledge["meta"]["failedProfiles"] = failed_profiles
+    if not knowledge.get("jobs"):
+        raise RuntimeError("没有完成有效岗位画像，已保留上一版数据；失败岗位：" + "、".join(failed_profiles[:10]))
+    report("向量化索引", 88)
+    publish_knowledge(knowledge)
+    report("刷新完成", 100)
     return knowledge, failed_jobs
 
 

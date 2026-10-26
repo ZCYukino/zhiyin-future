@@ -274,10 +274,19 @@ textarea {
 }
 
 /* 滚动条美化 */
+:root {
+  --scrollbar-thumb: #c1c9d2;
+  --scrollbar-track: transparent;
+  --scrollbar-hover: #a8b2bc;
+}
+* { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); scrollbar-width: thin; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #c1c9d2; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #a8b2bc; }
+@media (forced-colors: active) {
+  * { scrollbar-color: auto; }
+}
 
 /* ===== 全局统一关键帧（多处曾重复定义且数值漂移，收敛到此处唯一来源）===== */
 @keyframes card-rise {

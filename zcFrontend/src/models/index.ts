@@ -20,7 +20,7 @@ export const jobCategories: JobCategory[] = [
   { id: 'qa', name: '测试与质量', icon: 'finished', definition: '通过自动化测试、性能测试与质量度量保障软件质量，提升研发效能与交付可信度。' },
 ]
 
-/** 岗位数据；统计类字段可为 null（未采集到就不编造），前端以「—」呈现 */
+/** 岗位数据；统计类字段未采集到时为 null，前端以「—」呈现 */
 export interface JobItem {
   id: string
   name: string
@@ -47,10 +47,19 @@ export interface JobItem {
 
 export type SkillStack = 'ai' | 'backend' | 'cloud' | 'data' | 'embedded' | 'frontend' | 'product' | 'qa' | 'security' | 'tool'
 
+export type SkillEvidenceKind = 'observed' | 'inferred' | 'unverified'
+
+export function skillEvidenceLabel(kind?: SkillEvidenceKind): string {
+  if (kind === 'observed') return 'JD 抽取'
+  if (kind === 'inferred') return '模型推断'
+  return '来源未核验'
+}
+
 /** 单项技能规格 */
 export interface SkillSpec {
   name: string
   stack: SkillStack
+  evidenceKind?: SkillEvidenceKind
   /** 该技能在本岗位中的具体用途 */
   desc?: string
 }
@@ -106,6 +115,7 @@ export interface GraphEdge {
   target: string
   label: string
   weight: number
+  evidenceKind?: SkillEvidenceKind
   relation?: 'core' | 'required' | 'optional' | 'transfer' | 'similar' | 'advanced' | 'level'
 }
 
@@ -142,6 +152,7 @@ export interface CapabilityChange {
 /** 用户信息 */
 export interface UserInfo {
   id: string
+  analysisRevision?: number
   username: string
   role?: string
   name: string
@@ -163,8 +174,7 @@ export interface UserInfo {
   skillEvidence?: string
 }
 
-/** 个人能力画像 — 由后端 /profile/analyze 生成（LLM 优先，规则降级）
- *  简历事实驱动：技能达标度 / 学历 / 经验 / 项目含金量 / 证书获奖，均基于简历内部证据。 */
+/** 个人能力画像 — 由后端 /profile/analyze 生成（LLM 优先，规则降级） */
 export interface SkillAssessment {
   mastered: string[] // 达标（有项目/经验上下文证据）
   listed: string[]   // 已掌握但仅罗列（缺证据）
@@ -217,6 +227,7 @@ export type SkillPriority = 'must' | 'important' | 'bonus'
 
 export interface SkillStatus {
   name: string
+  evidenceKind?: SkillEvidenceKind
   level: SkillLevel
   stack: SkillStack
   status: SkillCoverageStatus
@@ -332,7 +343,7 @@ export function trendText(t: JobItem['trend']): string {
 
 /** 岗位能力变更数据源 */
 export function capabilitySourceOf(): string[] {
-  return ['中国公共招聘网 JD 聚合']
+  return ['快照内 LLM 推演（非市场历史统计）']
 }
 
 /** 单个周期变更的更新说明 */

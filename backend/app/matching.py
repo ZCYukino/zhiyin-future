@@ -1,4 +1,4 @@
-"""人岗匹配报告：规则算分 + LLM 生成学习路径与总结，对齐前端 MatchReport 结构。"""
+"""人岗匹配报告生成。"""
 from __future__ import annotations
 
 import logging
@@ -18,18 +18,18 @@ LEVEL_ORDER = {"junior": 0, "mid": 1, "senior": 2}
 VERDICT_LABEL = {"strong": "强匹配", "fair": "较强匹配", "partial": "部分匹配", "weak": "弱匹配"}
 VALID_STACKS = {"ai", "backend", "frontend", "data", "cloud", "security", "embedded", "product", "qa", "tool"}
 
-# 技能优先级权重：必备技能决定匹配度主体，加分技能只做小幅加分
+# 优先级权重
 PRIORITY_WEIGHT = {"must": 1.0, "important": 0.7, "bonus": 0.4}
 
-# 部分掌握按 60% 计分，避免措辞相近被过度拉低
+# 部分掌握按 60% 计分
 PARTIAL_FACTOR = 0.6
 
-# 覆盖率取幂后映射到 0~100：抬升低分段，保留两端点
+# 覆盖率曲线的幂次
 SCORE_CURVE_EXP = 0.65
 
-# ASCII 技能名按 token 精确匹配，避免 Java⊂JavaScript 这类子串误判
+# ASCII 技能词按 token 匹配
 _ASCII_TOKEN_RE = re.compile(r"[a-z0-9+#.]+")
-# 中文字段，只在中文之间做子串比较
+# 中文字段
 _CJK_RUN_RE = re.compile("[一-鿿]+")
 _SKILL_ALIASES = {
     "golang": "go",
@@ -42,25 +42,25 @@ _SKILL_ALIASES = {
     "ts": "typescript",
     "py": "python",
     "nodejs": "node",
-    # node.js 必须单独归一，否则与 nodejs 对不上
+    # node.js 归一为 node
     "node.js": "node",
     "vuejs": "vue",
     "vue.js": "vue",
     "postgres": "postgresql",
 }
-# 去掉点/连字符后相等视为同词；只对长度≥3 的 token 生效
+# 归一化 token 时去掉点与连字符
 _TOKEN_SEP_RE = re.compile(r"[.\-]")
 
 
 def _fold_token(t: str) -> str:
     return _TOKEN_SEP_RE.sub("", t)
 
-# LLM 生成单次超时（秒），失败不降级
+# LLM 调用超时（秒）
 MATCH_LLM_TIMEOUT = 30.0
 
 
 def _as_text(v: Any) -> str:
-    """把请求体里的任意值收敛成字符串，宁可当成空值也不让接口崩。"""
+    """任意值转字符串，不可序列化的类型视为空串。"""
     if isinstance(v, str):
         return v
     if v is None or isinstance(v, (dict, list, bool)):
@@ -69,8 +69,8 @@ def _as_text(v: Any) -> str:
 
 
 def normalize_skill_name(s: str) -> str:
-    # 去括号注释并转小写；保留空格供 ASCII 分词使用
-    return re.sub(r"[（(][^)）]*[)）]", "", s).replace("\t", " ").strip().lower()
+    # 去括号注释并转小写
+    return re.sub(r"[（(][^()（）]*[)）]", "", s).replace("\t", " ").strip().lower()
 
 
 def _ascii_tokens(s: str) -> set[str]:
@@ -81,11 +81,11 @@ _COMPACT_RE = re.compile(r"[^a-z0-9+#]")
 
 
 def _compact(s: str) -> str:
-    """只留下 ASCII 字母数字（+# 保留），丢掉空格与分隔符：'Vue 3' → 'vue3'。"""
+    """只保留 ASCII 字母数字（+# 保留）。"""
     return _COMPACT_RE.sub("", s.lower())
 
 
-# 泛用 ASCII 缩写不构成技能身份，避免「AI」一词误判整项技能
+# 泛用缩写不参与技能身份判定
 _GENERIC_ASCII = frozenset({
     "ai", "ml", "dl", "llm", "api", "sdk", "ui", "ux", "os", "db",
     "it", "id", "web", "app", "dev", "ops", "demo", "proj", "sys", "code",
@@ -93,13 +93,12 @@ _GENERIC_ASCII = frozenset({
 
 
 def _strong_tokens(s: str) -> set[str]:
-    """可用于判定「同一项技能」的 ASCII 词：先归一化，再剔除泛用缩写。"""
+    """用于技能身份判定的 ASCII 词（已剔除泛用缩写）。"""
     return {t for t in _ascii_tokens(s) if t not in _GENERIC_ASCII}
 
 
 def _ascii_overlap(a: str, b: str) -> bool:
-    """两串的 ASCII 词能否算同一个词：归一化精确相等，或去分隔符相等（node.js≡nodejs），
-    或拆写相等（'vue 3'≡'vue3'）。后两条只对长度≥3 的词生效，短词按原样比对。"""
+    """ASCII 词是否同词：归一化相等，或去分隔符、拆写后相等。"""
     ta, tb = _strong_tokens(a), _strong_tokens(b)
     if ta & tb:
         return True
@@ -119,7 +118,7 @@ def _ascii_overlap(a: str, b: str) -> bool:
 
 
 def _cjk_only(s: str) -> str:
-    """只保留中文字段，避免 ASCII 碎片污染中文比较。"""
+    """只保留中文字段。"""
     return "".join(_CJK_RUN_RE.findall(s))
 
 
@@ -140,25 +139,23 @@ def _longest_common_run(a: str, b: str) -> str:
     return a[end - best: end]
 
 
-# 只共用一个高频构词成分不算措辞相近；比对必须是整段公共子串
+# 只共用一个高频构词成分不算措辞相近
 _GENERIC_RUNS = frozenset({
     "数据", "设计", "开发", "控制", "分析", "系统", "功能", "计算", "管理", "部署",
     "模拟", "计算机", "网络", "技术", "平台", "应用", "能力", "经验", "流程",
     "工具", "信息", "模型", "服务", "优化", "项目", "辅助", "流程设计",
 })
-# 不收「测试」「结构」：同族词判 partial 是合理的
+# 「测试」「结构」等不收，同族词判 partial 合理
 
-# 最长公共子串的中文字段长度上限，超长输入直接判不相关
+# DP 输入长度上限
 _MAX_DP_CHARS = 120
 
-# 看着像但不是一回事的 ASCII 前缀对
+# 形似但不等价的词对
 _ASCII_FALSE_PREFIX = frozenset({("java", "javascript")})
 
 
 def _cjk_usable(s: str) -> bool:
-    """该侧中文字段是否够格当技能证据：≥3 字，或整串纯中文。
-    否则「Prompt设计」只剩 2 字后缀「设计」，会被长技能点整串包含。
-    这里用 _ascii_tokens 而不是 _strong_tokens：问的是含不含 ASCII。"""
+    """中文字段是否足以作为技能证据。"""
     c = _cjk_only(s)
     return bool(c) and (len(c) >= 3 or not _ascii_tokens(s))
 
@@ -167,24 +164,22 @@ def contains_match(a: str, b: str) -> bool:
     na, nb = a.strip().lower(), b.strip().lower()
     if not na or not nb:
         return False
-    # 完全同名即同一项技能，必须前置（泛用缩写的 token 集为空）
+    # 同名直接判同
     if na == nb:
         return True
-    # ASCII 按规范化 token 精确匹配，不能因含中文就改走中文分支
+    # ASCII 走 token 匹配
     if _ascii_overlap(na, nb):
         return True
-    # 中文双向子串包含，只比中文字段；被包含方须够格
+    # 中文双向包含
     ca, cb = _cjk_only(na), _cjk_only(nb)
     if not ca or not cb:
         return False
     if ca == cb:
-        # 中文字段相同还不够：岗位词带 ASCII 限定语而简历词没有时（LoRA微调←微调），
-        # 简历只证明了笼统的说法，不能算掌握
+        # 岗位带 ASCII 限定语而简历没有时，不算掌握
         if _strong_tokens(na) and not _strong_tokens(nb):
             return False
         return True
-    # ① 岗位词⊂简历词 → 更具体，算掌握
-    # ② 简历词⊂岗位词 → 更笼统，只有前缀成立（复合词中心语在后）
+    # 岗位词更具体算掌握；简历词更笼统时仅前缀成立
     if len(ca) < len(cb) and ca in cb:
         return _cjk_usable(na)
     if len(cb) < len(ca) and cb in ca:
@@ -196,7 +191,7 @@ def shared_substring(a: str, b: str) -> bool:
     na, nb = a.strip().lower(), b.strip().lower()
     if len(na) < 2 or len(nb) < 2:
         return False
-    # 共享长度≥3 的前缀才判相关
+    # 共享前缀至少 3 字符
     for x in _strong_tokens(na):
         for y in _strong_tokens(nb):
             if x == y:
@@ -206,24 +201,23 @@ def shared_substring(a: str, b: str) -> bool:
                 if (short, long) in _ASCII_FALSE_PREFIX:
                     continue
                 return True
-    # 公共片段须占两侧总长≥20% 才算措辞相近
+    # 公共片段占比至少 20%
     ca, cb = _cjk_only(na), _cjk_only(nb)
     if not ca or not cb or not (_cjk_usable(na) and _cjk_usable(nb)):
         return False
-    # 超长输入直接判不相关，挡掉 O(n·m) DP
+    # 超长输入跳过 DP
     if len(ca) > _MAX_DP_CHARS or len(cb) > _MAX_DP_CHARS:
         return False
     run = _longest_common_run(ca, cb)
     if len(run) < 2 or len(run) * 5 < len(ca) + len(cb):
         return False
-    # 排除只共用一个高频构词成分的情况
+    # 排除通用构词成分
     return run not in _GENERIC_RUNS
 
 
-_PAREN_RE = re.compile(r"[（(]([^)）]*)[)）]")
+_PAREN_RE = re.compile(r"[（(]([^()（）]*)[)）]")
 _INNER_SEP_RE = re.compile(r"[、,，;；/]")
-# 中文并列连接词：把「A与B」这类复合技能点拆成组成项
-# 用先行断言跳过词内字（如「参与」的「与」）
+# 并列连接词，先行断言跳过词内字
 _CONNECTOR_RE = re.compile(
     r"(?<![参赠])与"        # 参与 / 赠与
     r"|(?<![以涉普波遍顾提及])及"  # 以及 / 涉及 / 普及 / 及时 / 提及
@@ -232,12 +226,7 @@ _CONNECTOR_RE = re.compile(
 
 
 def skill_parts(name: str) -> tuple[list[str], list[str]]:
-    """把技能点拆成 (合取项, 举例项)。
-
-    合取项（A与B）：两个都要，只写其一算部分。
-    举例项（括号内「、」「/」枚举）：覆盖过半算完全掌握。
-    括号里写「IAA与置信度建模」是合取，归合取项。
-    """
+    """把技能点拆成（合取项，举例项）。"""
     base = normalize_skill_name(name)
     conj: list[str] = []
     alts: list[str] = []
@@ -269,11 +258,7 @@ _ASCII_RUN_RE = re.compile(r"[a-z0-9+#.]+")
 
 
 def text_segments(text: str) -> list[str]:
-    """把简历正文切成句段：括号外主体一段、每个括号内容单独成段。
-
-    括号会把技能点里的真正证据词隔断，不拆就扫不到；只在句段内比较，
-    避免跨行拼出假词（上一行「机器」+ 下一行「学习」）。
-    """
+    """把简历正文切成句段：括号外主体一段、每个括号内容单独成段。"""
     out: list[str] = []
     for raw in _TEXT_SEG_RE.split(text or ""):
         s = raw.strip()
@@ -312,33 +297,45 @@ def _term_span_re(term: str) -> re.Pattern[str] | None:
 
 
 def _fragment_usable(term: str) -> bool:
-    """合取/举例片段是否够格当正文直扫证据。
-
-    2 字片段在散文里到处都是（「安全」命中「网络安全测试」），
-    要求至少 3 个中文字，或带一个有辨识度的 ASCII 词。
-    """
+    """合取/举例片段是否够格当正文直扫证据。"""
     return len(_cjk_only(term)) >= 3 or bool(_strong_tokens(term))
 
 
-def _term_in_text(term: str, segments: list[str]) -> bool:
-    """岗位技能词是否逐字出现在简历正文里。
+_EVIDENCE_CLAUSE_RE = re.compile(r"[,，、:：]|但是|不过|然而|但")
+_NON_EVIDENCE_PREFIX_RE = re.compile(
+    r"从未|尚未|未曾|未(?:接触|使用|学习|掌握|了解)|"
+    r"不(?:会|懂|熟悉|了解|掌握|擅长|具备)|"
+    r"没有(?:使用|接触|学习|掌握)|计划|准备|打算|将来|未来|"
+    r"希望(?:学习|掌握|使用)|待(?:学习|掌握)|拟(?:学习|掌握)"
+)
+_NON_EVIDENCE_SUFFIX_RE = re.compile(
+    r"\s*(?:尚未|未曾|未(?:接触|使用|学习|掌握|了解)|"
+    r"不(?:会|懂|熟悉|了解|掌握)|暂无|没有.*经验|仅.*计划|待学习)"
+)
 
-    拿岗位自己的词去简历里找，不依赖前端词典覆盖面；只认逐字出现，不引入误判。
-    """
+
+def _asserted_evidence(segment: str, start: int, end: int) -> bool:
+    """正文只认明确经历；在当前短分句中排除否定和未来计划，不影响显式技能表。"""
+    prefix = _EVIDENCE_CLAUSE_RE.split(segment[max(0, start - 30):start])[-1]
+    suffix = _EVIDENCE_CLAUSE_RE.split(segment[end:end + 30])[0]
+    return not (_NON_EVIDENCE_PREFIX_RE.search(prefix) or _NON_EVIDENCE_SUFFIX_RE.match(suffix))
+
+
+def _term_in_text(term: str, segments: list[str]) -> bool:
+    """岗位技能词是否逐字出现在简历正文里。"""
     if not segments:
         return False
     rx = _term_span_re(term)
     if rx is None:
         return False
-    return any(rx.search(seg) for seg in segments)
+    return any(
+        _asserted_evidence(seg, match.start(), match.end())
+        for seg in segments for match in rx.finditer(seg)
+    )
 
 
 def classify_skill(req_name: str, user_skills: list[str], segments: list[str] | None = None) -> str:
-    """三分类 mastered / partial / missing。
-
-    有合取项时需逐字写全或全部覆盖才算掌握；无合取项看本体命中；
-    举例项覆盖过半即掌握；都不命中时措辞相近判 partial。
-    """
+    """三分类 mastered / partial / missing。"""
     base = normalize_skill_name(req_name)
     conj, alts = skill_parts(req_name)
     segs = segments or []
@@ -395,18 +392,20 @@ def edu_level_of(s: str) -> int:
     return 0
 
 
-_YEAR_RANGE_RE = re.compile(r"(\d+)\s*[-~—－–至到]\s*(\d+)\s*年")
-_YEAR_RE = re.compile(r"(\d+)\s*年")
+_YEAR_RANGE_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*[-~—－–至到]\s*(\d+(?:\.\d+)?)\s*年")
+_YEAR_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*年")
 
 
-def parse_years(s: str) -> int:
+def parse_years(s: str) -> int | float:
     """从年限描述取入职门槛：区间取下界（1-3年 → 1），其余取唯一值，未写为 0。"""
     t = s or ""
     m = _YEAR_RANGE_RE.search(t)
-    if m:
-        return int(m.group(1))
-    m = _YEAR_RE.search(t)
-    return int(m.group(1)) if m else 0
+    if not m:
+        m = _YEAR_RE.search(t)
+    if not m:
+        return 0
+    years = float(m.group(1))
+    return int(years) if years.is_integer() else years
 
 
 def _resolve_stack(name: str, stack: str | None) -> str:
@@ -447,7 +446,7 @@ def build_match_report(
     snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """生成匹配报告；snapshot 显式传入时用它，否则读最新快照。"""
-    # 只读路径走缓存版，避免每次请求都读盘解析快照
+    # 只读路径使用快照缓存
     k = snapshot if snapshot is not None else store.load_cached_snapshot()
     jobs = k.get("jobs", []) or []
     job = next((j for j in jobs if j.get("id") == job_id), None)
@@ -471,10 +470,12 @@ def build_match_report(
             for s in progression.get(level, []) or []:
                 name = s["name"] if isinstance(s, dict) else str(s)
                 stack = _resolve_stack(name, s.get("stack") if isinstance(s, dict) else None)
-                specs.append({"name": name, "stack": stack, "level": level})
+                specs.append({"name": name, "stack": stack, "level": level,
+                              "evidenceKind": s.get("evidenceKind", "unverified") if isinstance(s, dict) else "unverified"})
     else:
         for s in job.get("skills", []) or []:
-            specs.append({"name": s, "stack": _infer_stack(s), "level": "junior"})
+            specs.append({"name": s, "stack": _infer_stack(s), "level": "junior",
+                          "evidenceKind": (job.get("skillEvidence") or {}).get(s, "unverified")})
 
     mastered: list[dict[str, Any]] = []
     partial: list[dict[str, Any]] = []
@@ -487,6 +488,7 @@ def build_match_report(
             "stack": spec["stack"],
             "status": status,
             "priority": priority_from_level(spec["level"]),
+            "evidenceKind": spec["evidenceKind"],
         }
         if status == "mastered":
             mastered.append(item)
@@ -547,7 +549,7 @@ def build_match_report(
     one_line_summary: str | None = None
     learning_path: list[dict[str, Any]] = []
     llm_status = "ok"
-    # 凭据只接受显式传入，绝不从 body.user 解析（id 可伪造）
+    # 凭据只接受显式传入
     cred = credentials if credentials is not None else settings.llm_credentials(None)
     if not cred.configured:
         llm_status = "no_api_key"
@@ -592,7 +594,7 @@ def build_match_report(
                             )
                     if cleaned:
                         learning_path = cleaned
-                # 有缺口但没产出学习路径，不得谎报无缺口
+                # 有缺口但无学习路径时标记失败
                 if not learning_path and (missing or partial):
                     llm_status = "failed"
             else:

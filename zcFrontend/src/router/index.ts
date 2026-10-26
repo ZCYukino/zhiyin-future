@@ -59,8 +59,9 @@ const router = createRouter({
 router.beforeEach(async (to, _from) => {
   NProgress.start()
   if (!to.meta.noAuth) {
-    const token = localStorage.getItem('zc_token')
-    if (!token) return '/login'
+    const userStore = useUserStore()
+    await userStore.init()
+    if (!userStore.isLoggedIn) return '/login'
   }
   if (to.meta.requiresAdmin) {
     const userStore = useUserStore()
@@ -87,5 +88,6 @@ router.beforeEach(async (to, _from) => {
 router.afterEach(() => {
   NProgress.done()
 })
+router.onError(() => NProgress.done())
 
 export default router

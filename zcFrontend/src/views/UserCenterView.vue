@@ -51,11 +51,11 @@
               <div class="card-divider"></div>
 
               <div class="resume-section">
-                <input ref="fileInput" type="file" accept=".pdf,.doc,.docx" style="display:none" @change="handleFileChange" />
+                <input ref="fileInput" type="file" :disabled="resumeParsing || saving" accept=".pdf,.docx,.txt,.md" style="display:none" @change="handleFileChange" />
                 <div v-if="!resumeUploaded" class="upload-area" @click="triggerUpload">
                   <IconEpUpload class="upload-icon" />
                   <p class="upload-text">点击上传简历</p>
-                  <p class="upload-hint">支持 PDF / Word 格式</p>
+                  <p class="upload-hint">支持 PDF / DOCX / TXT 格式</p>
                 </div>
                 <div v-else class="resume-info">
                   <div class="resume-file-row">
@@ -65,14 +65,14 @@
                       <span class="resume-status-text">{{ resumeParsing ? '解析中…' : '已上传' }}</span>
                     </div>
                   </div>
-                  <button class="reupload-btn" :disabled="resumeParsing" @click="triggerUpload">
+                  <button class="reupload-btn" :disabled="resumeParsing || saving" @click="triggerUpload">
                     <IconEpRefresh /> 重新上传
                   </button>
                 </div>
               </div>
 
               <div class="form-actions">
-                <el-button type="primary" @click="saveProfile" :loading="saving">
+                <el-button type="primary" @click="saveProfile" :loading="saving" :disabled="resumeParsing">
                   <IconEpCheck /> 保存信息
                 </el-button>
               </div>
@@ -93,7 +93,7 @@
                   <span class="doc-line"></span>
                 </div>
                 <p class="empty-title">上传简历后生成能力画像</p>
-                <p class="empty-desc">系统将提取简历技能与经历，由 AI 生成能力画像分析</p>
+                <p class="empty-desc">系统将提取简历技能与经历，生成能力画像分析</p>
               </div>
 
               <div v-else class="analysis-content">
@@ -252,10 +252,10 @@
                 </template>
 
                 <div v-else-if="profileLoading" class="profile-hint">
-                  <p>正在生成能力画像，AI 正在分析您的技能与经历，通常需要几十秒，请稍候…</p>
+                  <p>正在生成能力画像，系统正在分析您的技能与经历，通常需要几十秒，请稍候…</p>
                 </div>
                 <div v-else class="profile-hint">
-                  <p>上传简历后，点击「生成能力画像」由 AI 生成完整的能力评估。</p>
+                  <p>上传简历后，点击「生成能力画像」即可完成能力评估。</p>
                 </div>
               </div>
             </div>
@@ -275,6 +275,7 @@ import { services } from '@/services'
 import { useApiKeyStatus } from '@/composables/useApiKeyStatus'
 import { flattenSkillTerms, skillEvidenceMap } from '@/utils/resumeParser'
 import type { ResumeParseResult } from '@/utils/resumeParser'
+import { captureSession, isCurrentSession } from '@/utils/session'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -297,6 +298,7 @@ const resumeFileName = ref('')
 const fileInput = ref<HTMLInputElement>()
 
 let resumeRestored = false
+let disposed = false
 
 const profile = computed(() => analysisStore.abilityProfile)
 const profileLoading = computed(() => analysisStore.profileLoading)
@@ -334,11 +336,13 @@ async function handleFileChange(e: Event) {
   const file = input.files && input.files[0]
   input.value = ''
   if (!file) return
+  const session = captureSession()
   resumeParsing.value = true
   resumeFileName.value = file.name
   resumeUploaded.value = true
   try {
     const result = await services.parseResumeFile(file)
+    if (disposed || !isCurrentSession(session)) return
     await applyParseResult(result)
   } catch (err: any) {
     ElMessage.error(err?.message || '简历解析失败，请重新上传')
@@ -357,8 +361,8 @@ async function handleFileChange(e: Event) {
 async function applyParseResult(result: ResumeParseResult) {
   resumeUploaded.value = true
   const cur = userStore.userInfo
-  // 学历回填表单，避免保存时被空值覆盖
-  const edu = form.education || result.education || cur?.education || ''
+  // 学历回填表单
+  const edu = result.education || form.education || cur?.education || ''
   form.education = edu
   if (result.skills.length === 0) {
     ElMessage.warning('未从简历中识别出技能，画像结果可能不完整')
@@ -379,8 +383,7 @@ async function applyParseResult(result: ResumeParseResult) {
     throw new Error('简历保存失败，请检查后端是否已启动')
   }
   // 保存成功后才清旧画像/旧报告，失败时保留旧结果
-  analysisStore.clearAbilityProfile()
-  analysisStore.clearMatchReport()
+  analysisStore.reset()
   ElMessage.success('简历已解析，可直接生成能力画像')
 }
 
@@ -423,6 +426,7 @@ onMounted(() => {
   analysisStore.loadAbilityProfile()
   fetchKeyStatus()
 })
+onUnmounted(() => { disposed = true })
 </script>
 
 <style scoped>

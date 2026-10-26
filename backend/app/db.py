@@ -1,14 +1,12 @@
-"""SQLite 用户存储：连接、建表、密码哈希与用户 CRUD。
-
-密码 PBKDF2-HMAC-SHA256，token 见 auth.py，对外返回 camelCase 字段；
-基于内置 sqlite3（单文件 backend/data/users.db），零外部数据库依赖。
-"""
+"""SQLite 用户存储：连接、建表、密码哈希与用户 CRUD。"""
 from __future__ import annotations
 
 import hashlib
 import json
 import secrets
 import sqlite3
+import threading
+from dataclasses import dataclass
 from typing import Any
 
 from . import config
@@ -39,7 +37,9 @@ CREATE TABLE IF NOT EXISTS users (
     skill_evidence TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     ability_profile TEXT,
-    match_report TEXT
+    match_report TEXT,
+    token_version INTEGER NOT NULL DEFAULT 0,
+    analysis_revision INTEGER NOT NULL DEFAULT 0
 )
 """
 
@@ -57,6 +57,8 @@ _MIGRATIONS = (
     ("skill_evidence", "ALTER TABLE users ADD COLUMN skill_evidence TEXT"),
     ("ability_profile", "ALTER TABLE users ADD COLUMN ability_profile TEXT"),
     ("match_report", "ALTER TABLE users ADD COLUMN match_report TEXT"),
+    ("token_version", "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"),
+    ("analysis_revision", "ALTER TABLE users ADD COLUMN analysis_revision INTEGER NOT NULL DEFAULT 0"),
 )
 
 # 每账号每 provider 一行，接口只回显脱敏值
@@ -70,41 +72,59 @@ CREATE TABLE IF NOT EXISTS user_api_keys (
 )
 """
 
+_SECRETS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS app_secrets (
+    name TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+)
+"""
 
-# 建表已在哪个库文件跑过（按路径记录，测试 monkeypatch 后自动重建）
+
+# 记录已建表的库文件路径
 _initialized_path: str | None = None
+_initialization_lock = threading.Lock()
 
 
-def _connect() -> sqlite3.Connection:
-    global _initialized_path
-    path = str(config.DB_PATH)
-    if _initialized_path != path:
-        # 先置位再建表，避免 init_db 递归；建表连接用完即关
-        _initialized_path = path
-        try:
-            init_db()
-        except Exception:
-            _initialized_path = None  # 建表失败，下次连接重试
-            raise
+def _raw_connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.isolation_level = None  # 自动提交
-    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        conn.close()
+        raise
     return conn
+
+
+def _connect() -> sqlite3.Connection:
+    path = str(config.DB_PATH)
+    if _initialized_path != path:
+        init_db()
+    return _raw_connect(path)
 
 
 def init_db() -> None:
     """幂等建表（含列迁移），由 _connect() 在首次连接某库文件时自动调用。"""
-    conn = _connect()
-    try:
-        conn.execute(_SCHEMA)
-        conn.execute(_KEYS_SCHEMA)
-        cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-        for col, ddl in _MIGRATIONS:
-            if col not in cols:
-                conn.execute(ddl)
-    finally:
-        conn.close()
+    global _initialized_path
+    path = str(config.DB_PATH)
+    with _initialization_lock:
+        conn = _raw_connect(path)
+        try:
+            # SQLite 写事务同时串行化其它进程的 schema 检查与迁移。
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(_SCHEMA)
+            conn.execute(_KEYS_SCHEMA)
+            conn.execute(_SECRETS_SCHEMA)
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+            for col, ddl in _MIGRATIONS:
+                if col not in cols:
+                    conn.execute(ddl)
+            conn.commit()
+        finally:
+            conn.close()
+        # 只有完整建表成功后，其它线程才可跳过初始化。
+        _initialized_path = path
 
 
 PBKDF2_ITERATIONS = 100_000
@@ -170,6 +190,7 @@ def _row_to_user(row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | N
         "projects": row.get("projects") or "",
         "skillEvidence": row.get("skill_evidence") or "",
         "userSkills": skills,
+        "analysisRevision": int(row.get("analysis_revision") or 0),
     }
 
 
@@ -214,16 +235,28 @@ def ensure_admin(username: str, password: str) -> None:
         conn.close()
 
 
-def authenticate(username: str, password: str) -> dict[str, Any] | None:
-    """校验用户名密码，成功返回 user（JWT 由上层 auth 模块签发）。"""
+@dataclass(frozen=True)
+class AuthenticatedUser:
+    user: dict[str, Any]
+    token_version: int
+
+
+def authenticate_with_token_version(username: str, password: str) -> AuthenticatedUser | None:
+    """认证资料与撤销版本取自同一行；改密后不能让旧密码流程拿到新版本。"""
     conn = _connect()
     try:
         row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
         if not row or not verify_password(password, row["password_hash"]):
             return None
-        return _row_to_user(row)
+        return AuthenticatedUser(_row_to_user(row), int(row["token_version"]))
     finally:
         conn.close()
+
+
+def authenticate(username: str, password: str) -> dict[str, Any] | None:
+    """校验用户名密码并仅返回公开 user 字段。"""
+    authenticated = authenticate_with_token_version(username, password)
+    return authenticated.user if authenticated is not None else None
 
 
 # 前端 camelCase 字段 → users 表列名
@@ -249,31 +282,43 @@ _FIELD_TO_COLUMN = {
 
 def update_user(user_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
     """按 id 更新资料；skills 以 userSkills 数组传入。返回更新后 user。"""
-    sets: list[str] = []
-    params: list[Any] = []
+    changes: dict[str, Any] = {}
 
     for key, value in fields.items():
         if key == "userSkills":
             if isinstance(value, list):
-                sets.append("skills = ?")
-                params.append(json.dumps(value, ensure_ascii=False))
+                changes["skills"] = json.dumps(value, ensure_ascii=False)
             continue
         col = _FIELD_TO_COLUMN.get(key)
         if col is None:
             continue
         if key == "hasResume":
             value = 1 if value else 0
-        sets.append(f"{col} = ?")
-        params.append(value)
+        changes[col] = value
 
-    if not sets:
+    if not changes:
         return get_user_by_id(user_id)
 
     conn = _connect()
     try:
+        # 资料、失效标志和版本在同一事务里变更；联系信息不影响分析。
+        conn.execute("BEGIN IMMEDIATE")
+        current = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if current is None:
+            conn.rollback()
+            return None
+        analysis_changed = any(
+            col not in ("email", "phone") and current[col] != value
+            for col, value in changes.items()
+        )
+        sets = [f"{col} = ?" for col in changes]
+        params = list(changes.values())
+        if analysis_changed:
+            sets.extend(("analysis_revision = analysis_revision + 1", "ability_profile = NULL", "match_report = NULL"))
         params.append(user_id)
         conn.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = ?", params)
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        conn.commit()
         return _row_to_user(row)
     finally:
         conn.close()
@@ -295,24 +340,61 @@ def change_password(user_id: int, old_password: str, new_password: str) -> bool:
         row = conn.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
         if not row or not verify_password(old_password, row["password_hash"]):
             return False
-        conn.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
-            (hash_password(new_password), user_id),
+        # 改密需持有已验证的密码行
+        changed = conn.execute(
+            "UPDATE users SET password_hash = ?, token_version = token_version + 1 "
+            "WHERE id = ? AND password_hash = ?",
+            (hash_password(new_password), user_id, row["password_hash"]),
         )
-        return True
+        return changed.rowcount == 1
     finally:
         conn.close()
 
 
-def _save_json_column(user_id: int, column: str, data: dict[str, Any] | None) -> None:
+def get_token_version(user_id: int) -> int:
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT token_version FROM users WHERE id = ?", (user_id,)).fetchone()
+        return int(row["token_version"]) if row else 0
+    finally:
+        conn.close()
+
+
+def get_or_create_app_secret(name: str) -> str:
+    """原子持久化系统随机密钥；多个 worker 同时启动也使用相同值。"""
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT value FROM app_secrets WHERE name = ?", (name,)).fetchone()
+        if row:
+            return str(row["value"])
+        conn.execute(
+            "INSERT OR IGNORE INTO app_secrets (name, value) VALUES (?, ?)",
+            (name, secrets.token_urlsafe(48)),
+        )
+        row = conn.execute("SELECT value FROM app_secrets WHERE name = ?", (name,)).fetchone()
+        return str(row["value"])
+    finally:
+        conn.close()
+
+
+def _save_json_column(
+    user_id: int, column: str, data: dict[str, Any] | None,
+    expected_revision: int | None = None,
+) -> bool:
     """把 dict 写入 users 表的指定 JSON 列；data 为 None 时清空该列。"""
     payload = json.dumps(data, ensure_ascii=False) if data is not None else None
     conn = _connect()
     try:
-        conn.execute(
-            f'UPDATE users SET "{column}" = ? WHERE id = ?',
-            (payload, user_id),
-        )
+        assignments = f'"{column}" = ?'
+        if data is None:
+            # 用户显式清除也废弃在途分析，防止随后完成的旧生成再次写回。
+            assignments += ", analysis_revision = analysis_revision + 1"
+        sql = f'UPDATE users SET {assignments} WHERE id = ?'
+        params: list[Any] = [payload, user_id]
+        if expected_revision is not None:
+            sql += " AND analysis_revision = ?"
+            params.append(expected_revision)
+        return conn.execute(sql, params).rowcount == 1
     finally:
         conn.close()
 
@@ -331,16 +413,20 @@ def _get_json_column(user_id: int, column: str) -> dict[str, Any] | None:
         conn.close()
 
 
-def save_ability_profile(user_id: int, data: dict[str, Any] | None) -> None:
-    _save_json_column(user_id, "ability_profile", data)
+def save_ability_profile(
+    user_id: int, data: dict[str, Any] | None, expected_revision: int | None = None,
+) -> bool:
+    return _save_json_column(user_id, "ability_profile", data, expected_revision)
 
 
 def get_ability_profile(user_id: int) -> dict[str, Any] | None:
     return _get_json_column(user_id, "ability_profile")
 
 
-def save_match_report(user_id: int, data: dict[str, Any] | None) -> None:
-    _save_json_column(user_id, "match_report", data)
+def save_match_report(
+    user_id: int, data: dict[str, Any] | None, expected_revision: int | None = None,
+) -> bool:
+    return _save_json_column(user_id, "match_report", data, expected_revision)
 
 
 def get_match_report(user_id: int) -> dict[str, Any] | None:
@@ -402,7 +488,7 @@ def get_user_api_keys(user_id: int) -> dict[str, dict[str, Any]]:
 
 
 def get_admin_user_id() -> int | None:
-    """管理员账号行 id：按 config.ADMIN_USERNAME 查；找不到则回退 role='admin' 的最小 id。"""
+
     conn = _connect()
     try:
         row = conn.execute(

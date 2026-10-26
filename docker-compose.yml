@@ -1,3 +1,5 @@
+name: zhiyin-future
+
 services:
   app:
     build:

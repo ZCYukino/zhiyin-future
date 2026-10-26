@@ -1,7 +1,4 @@
-/**
- * 简历技能解析（纯前端）：别名字典 + 词边界匹配 + 结构化提取。
- * PDF/DOCX/TXT 文件解析均懒加载。
- */
+/** 简历技能解析（纯前端）：别名字典 + 词边界匹配 + 结构化提取。 */
 
 export interface ParsedSkill {
   name: string
@@ -219,7 +216,6 @@ function skillRegex(term: string): RegExp {
   const esc = escapeReg(term)
   const hasCJK = /[\u4e00-\u9fff]/.test(term)
   // 纯 ASCII 词加后缀边界，避免子串误报
-  // 不用后行断言（Safari<16.4 不支持），前缀边界改由 countUniqueHits 判断
   if (!hasCJK) return new RegExp(`${esc}(?![a-z0-9])`, 'gi')
   return new RegExp(esc, 'gi')
 }
@@ -298,21 +294,24 @@ function confidenceFor(hits: number): number {
 }
 
 function extractYears(text: string): number | undefined {
-  // 「年」与「经验」之间最多 15 个字符，避免跨句误匹配
-  const re = /(\d{1,2})\s*年[^。；，,\n]{0,15}?经验/g
+  // 保留小数与区间下限，月份不能四舍五入成年限。
+  const facts = text.split('\n').filter(s => !/未来|将来|预计|预期|招聘要求|岗位要求|任职要求|不足|不满|不到|未满/.test(s)).join('\n')
+  const re = /(^|[^\d.])(?:(半)\s*年|(\d+(?:\.\d+)?)\s*(?:(年|个月|月)\s*)?(?:[-~～—–至到]\s*\d+(?:\.\d+)?\s*)?(年|个月|月))[^。；，,\n]{0,15}?经验/g
   let max: number | undefined
   let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    const v = parseInt(m[1], 10)
+  while ((m = re.exec(facts)) !== null) {
+    const unit = m[4] || m[5]
+    const v = m[2] ? 0.5 : Number(m[3]) / (unit === '年' ? 1 : 12)
     if (v <= 30 && (max === undefined || v > max)) max = v
   }
   return max
 }
 function extractEducation(text: string): string | undefined {
-  if (/博士/.test(text)) return '博士'
-  if (/硕士/.test(text)) return '硕士'
-  if (/本科/.test(text)) return '本科'
-  if (/大专/.test(text)) return '大专'
+  const completed = text.split(/[\n。；;,，]+/).filter(s => !/在读|就读|在学|肄业|未毕业|预计|预期|应届|应聘|岗位要求|招聘要求|学历要求/.test(s)).join('\n')
+  if (/博士/.test(completed)) return '博士'
+  if (/硕士/.test(completed)) return '硕士'
+  if (/本科/.test(completed)) return '本科'
+  if (/大专/.test(completed)) return '大专'
   return undefined
 }
 
@@ -373,10 +372,7 @@ const PROJECT_SIGNALS: [RegExp, string][] = [
 /** 项目名词，用于识别项目描述句 */
 const PROJECT_NOUNS = /系统|平台|项目|App|小程序|网站|引擎|模块|工具|中台|服务|数据库|商城|门户|后台|框架/
 
-/**
- * 叙述型能力短语 → 标准技能名的映射。
- * 收录标准同别名表：模式本身必须已断言该能力。正则不能加 g 标志（test 会记忆 lastIndex）。
- */
+/** 叙述型能力短语 → 标准技能名的映射。 */
 const CAPABILITY_PATTERNS: [RegExp, string][] = [
   [/跨(部门|团队|职能)/, '跨部门协作'],
   [/(统筹|牵头|带领|组织|协调).{0,10}(团队|小组|成员|部门|各方|资源)/, '跨部门协作'],
@@ -423,9 +419,8 @@ function splitSegments(text: string): string[] {
 /** 技能出现在动作动词句子里 → 达标；仅罗列 → listed */
 function evidenceFor(terms: string[], text: string): 'mastered' | 'listed' {
   const lower = text.toLowerCase()
-  const lterms = terms.map(t => t.toLowerCase())
   for (const seg of splitSegments(lower)) {
-    if (lterms.some(t => seg.includes(t)) && ACTION_VERBS.test(seg)) return 'mastered'
+    if (countUniqueHits(terms, seg).hits > 0 && ACTION_VERBS.test(seg)) return 'mastered'
   }
   return 'listed'
 }
@@ -457,8 +452,17 @@ function extractProjects(text: string): ProjectInfo[] {
   return projects
 }
 
+
+function factualResumeText(text: string): string {
+  return text.split(/[\n。；;!！?？，,]+/)
+    .map(s => s.trim())
+    .filter(s => !/尚未|从未|没有|未曾|未能|未.{0,4}(参加|使用|掌握|接触|获得|通过|取得|持有)|未获|不熟悉|不擅长|不了解|不会|不具备|无.{0,8}(经验|经历|证书)|计划|打算|准备学习|拟攻读|希望|(学习|职业|求职|发展)目标|目标[：:]|目标岗位|待学习|待掌握|待提升|学习中|正在学习|\b(no experience|not familiar|not proficient|planning to|plan to|learning goals?|will learn)\b/i.test(s))
+    .join('\n')
+}
+
 export function parseResumeText(text: string): ResumeParseResult {
-  const lower = text.toLowerCase()
+  const facts = factualResumeText(text)
+  const lower = facts.toLowerCase()
   const dict = getDict()
   const skills: ParsedSkill[] = []
   const byName = new Map<string, ParsedSkill>()
@@ -470,7 +474,7 @@ export function parseResumeText(text: string): ResumeParseResult {
         name: entry.name,
         confidence: confidenceFor(hits),
         hits,
-        evidence: evidenceFor(terms, text),
+        evidence: evidenceFor(terms, facts),
         terms: emitTerms(entry.name, matched),
       }
       byName.set(entry.name, s)
@@ -478,7 +482,7 @@ export function parseResumeText(text: string): ResumeParseResult {
     }
   }
   for (const [re, label] of CAPABILITY_PATTERNS) {
-    if (!re.test(text)) continue
+    if (!re.test(facts)) continue
     const cur = byName.get(label)
     if (cur) {
       if (!cur.terms.includes(label)) cur.terms.push(label)
@@ -488,7 +492,8 @@ export function parseResumeText(text: string): ResumeParseResult {
     byName.set(label, s)
     skills.push(s)
   }
-  const awards = collectPatterns(text, AWARD_PATTERNS)
+  const awardFacts = facts.split('\n').filter(s => /获|一等奖|二等奖|三等奖|冠军|亚军|季军|金奖|银奖|铜奖|奖学金|优秀毕业生|三好学生|优秀学生|优秀干部|先进个人|荣誉称号/.test(s)).join('\n')
+  const awards = collectPatterns(awardFacts, AWARD_PATTERNS)
   // 竞赛奖项映射为技能点，奖学金/荣誉称号不算
   if (awards.some(a => COMPETITION_AWARDS.has(a)) && !byName.has('计算机竞赛获奖')) {
     const s: ParsedSkill = { name: '计算机竞赛获奖', confidence: 0.72, hits: 1, evidence: 'mastered', terms: ['计算机竞赛获奖'] }
@@ -498,18 +503,17 @@ export function parseResumeText(text: string): ResumeParseResult {
   skills.sort((a, b) => b.confidence - a.confidence || b.hits - a.hits)
   return {
     skills,
-    years: extractYears(text),
-    education: extractEducation(text),
-    certificates: collectPatterns(text, CERT_PATTERNS),
+    years: extractYears(facts),
+    education: extractEducation(facts),
+    certificates: collectPatterns(facts, CERT_PATTERNS),
     awards,
-    projects: extractProjects(text),
+    projects: extractProjects(facts),
     rawText: text,
   }
 }
 
 /** 解析 PDF 文本（懒加载 pdfjs-dist，worker 用 vite ?worker 创建） */
 export async function extractPdfText(buf: ArrayBuffer): Promise<{ text: string; hasImages: boolean }> {
-  // 必须用 legacy 构建：新版 default 构建在旧浏览器会抛 Iterator is not defined
   const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs')
   const workerMod: any = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker')
   pdfjs.GlobalWorkerOptions.workerPort = new workerMod.default()

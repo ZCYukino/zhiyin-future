@@ -1,13 +1,10 @@
-"""招聘站点爬虫实现。
-
-数据源：中国公共招聘网（job.mohrss.gov.cn，政府站点）与国聘（www.iguopin.com）。
-低频率请求（0.8~2s 随机延迟 + 重试）；仅采集岗位信息，不采集个人联系方式。
-"""
+"""招聘站点爬虫实现。"""
 from __future__ import annotations
 
 import html
 import json
 import re
+import math
 
 from .base import RawJob, fetch, post_json
 
@@ -19,8 +16,19 @@ def _to_int(v) -> int:
         return 0
 
 
+def _to_number(value) -> float:
+    try:
+        number = float(value or 0)
+        return number if math.isfinite(number) else 0
+    except (ValueError, TypeError):
+        return 0
+
+
 class MohrssCrawler:
     """中国公共招聘网爬虫：按关键词检索并解析内嵌 JSON 岗位列表。"""
+
+    def __init__(self) -> None:
+        self.errors: list[str] = []
 
     name = "mohrss"
     BASE = "http://job.mohrss.gov.cn/cjobs/jobinfolist/listJobinfolist"
@@ -61,6 +69,8 @@ class MohrssCrawler:
     def crawl(self, keyword: str, limit: int = 5, pages: int = 2) -> list[RawJob]:
         jobs: list[RawJob] = []
         seen: set[str] = set()
+        seen_pages: set[tuple[str, ...]] = set()
+        self.errors: list[str] = []
         for page_no in range(1, pages + 1):
             try:
                 resp = fetch(
@@ -69,9 +79,21 @@ class MohrssCrawler:
                     headers={"Referer": self.BASE},
                     encoding="utf-8",
                 )
-            except Exception:  # noqa: BLE001 单页失败不阻断整体
-                continue
-            for raw in self._parse(resp.text):
+            except Exception as error:  # 已完成的页面仍可用，故障显式返回统计
+                self.errors.append(f"page {page_no}: {type(error).__name__}")
+                break
+            try:
+                rows = self._parse(resp.text)
+            except ValueError:
+                self.errors.append(f"page {page_no}: 岗位列表结构不可识别")
+                break
+            if not rows:
+                break
+            page_ids = tuple(raw.url for raw in rows)
+            if page_ids in seen_pages:
+                break
+            seen_pages.add(page_ids)
+            for raw in rows:
                 if not raw.url or raw.url in seen:
                     continue
                 if not self._is_tech(raw):
@@ -88,28 +110,30 @@ class MohrssCrawler:
         return jobs
 
     def _fetch_detail(self, url: str) -> str:
-        """抓取详情页完整岗位描述（<span id="gwms"> 正文），失败返回空串。"""
+        """抓取详情页描述；失败保留列表摘要，并把详情故障记入来源统计。"""
         try:
             resp = fetch(url, headers={"Referer": self.BASE}, encoding="utf-8")
             m = re.search(r'<span id="gwms">(.*?)</span>', resp.text, re.S)
             if not m:
+                self.errors.append("detail: 岗位描述结构不可识别")
                 return ""
             text = re.sub(r"<[^>]+>", "", m.group(1))
             return html.unescape(text).strip()
-        except Exception:  # noqa: BLE001 详情页失败不影响列表数据
+        except Exception as error:  # noqa: BLE001 详情页失败不影响列表数据
+            self.errors.append(f"detail: {type(error).__name__}")
             return ""
 
     def _parse(self, page_html: str) -> list[RawJob]:
         """从列表页隐藏域 findjoblist 解析岗位 JSON 数组。"""
         m = re.search(r'findjoblist[^>]*value="([^"]*)"', page_html)
         if not m:
-            return []
+            raise ValueError("缺少 findjoblist 列表字段")
         try:
             rows = json.loads(html.unescape(m.group(1)))
-        except json.JSONDecodeError:
-            return []
+        except json.JSONDecodeError as error:
+            raise ValueError("岗位列表不是合法 JSON") from error
         if not isinstance(rows, list):
-            return []
+            raise ValueError("岗位列表不是数组")
 
         out: list[RawJob] = []
         for row in rows:
@@ -122,6 +146,8 @@ class MohrssCrawler:
             city = str(row.get("aab302") or "").strip()
             company = str(row.get("aab004") or "").strip()
             jid = _to_int(row.get("acb200"))
+            if not jid:
+                continue
             # 元/月 转 K/月
             sal_min_raw = _to_int(row.get("acb241"))
             sal_max_raw = _to_int(row.get("acb242"))
@@ -187,6 +213,8 @@ class IguopinCrawler:
     def crawl(self, keyword: str, limit: int = 5, pages: int = 1) -> list[RawJob]:
         jobs: list[RawJob] = []
         seen: set[str] = set()
+        seen_pages: set[tuple[str, ...]] = set()
+        self.errors: list[str] = []
         for page_no in range(1, pages + 1):
             try:
                 data = post_json(
@@ -194,11 +222,24 @@ class IguopinCrawler:
                     payload={"search": {"page": page_no, "page_size": 20, "keyword": keyword}},
                     headers={"Origin": "https://www.iguopin.com", "Referer": "https://www.iguopin.com/"},
                 )
-            except Exception:  # noqa: BLE001 单页失败不阻断整体
-                continue
+            except Exception as error:
+                self.errors.append(f"page {page_no}: {type(error).__name__}")
+                break
             if not isinstance(data, dict) or data.get("code") != 200:
-                continue
-            for row in ((data.get("data") or {}).get("list") or []):
+                self.errors.append(f"page {page_no}: API返回错误状态")
+                break
+            body = data.get("data")
+            if not isinstance(body, dict) or not isinstance(body.get("list"), list):
+                self.errors.append(f"page {page_no}: 岗位列表结构不可识别")
+                break
+            rows = body["list"]
+            if not rows:
+                break
+            page_ids = tuple(str(row.get("job_id") or "") for row in rows if isinstance(row, dict))
+            if page_ids in seen_pages:
+                break
+            seen_pages.add(page_ids)
+            for row in rows:
                 if not isinstance(row, dict):
                     continue
                 jid = str(row.get("job_id") or "")
@@ -218,13 +259,16 @@ class IguopinCrawler:
     def _to_raw(self, row: dict, jid: str) -> RawJob:
         title = str(row.get("job_name") or "").strip()
         description = str(row.get("contents") or "").strip()
-        # 取区县级行政区，交由 normalize_city 归一
-        districts = row.get("district_list") or []
-        area = str((districts[0] or {}).get("area_cn") or "") if districts else ""
-        city = area.split("-")[-1].rstrip("等") if area else ""
+        # 保留完整层级，供清洗模块选择明确的市
+        districts = row.get("district_list")
+        district = next((item for item in districts if isinstance(item, dict)), {}) if isinstance(districts, list) else {}
+        area = district.get("area_cn")
+        city = area.strip().rstrip("等") if isinstance(area, str) else ""
+        if district.get("province") and not district.get("city") and city not in ("北京", "北京市", "上海", "上海市", "天津", "天津市", "重庆", "重庆市"):
+            city = ""  # 只有省级代码的“广东”等不是城市。
         # 央企岗多为面议，仅少数写明
-        sal_min_raw = _to_int(row.get("min_wage"))
-        sal_max_raw = _to_int(row.get("max_wage"))
+        sal_min_raw = _to_number(row.get("min_wage"))
+        sal_max_raw = _to_number(row.get("max_wage"))
         unit = str(row.get("wage_unit_cn") or "")
         if sal_min_raw > 0 or sal_max_raw > 0:
             # 换算为 K/月：元→/1000，万→×10，千→原值
@@ -234,6 +278,11 @@ class IguopinCrawler:
                 factor = 1.0
             else:
                 factor = 0.001
+            if "年" in unit:
+                factor /= 12
+            elif unit and "月" not in unit:
+                # 周期不可靠时保留原薪资文字
+                factor = 0
             sal_min = round(sal_min_raw * factor, 1) if sal_min_raw > 0 else None
             sal_max = round(sal_max_raw * factor, 1) if sal_max_raw > 0 else None
             salary = self._salary_text(sal_min_raw, sal_max_raw, unit)

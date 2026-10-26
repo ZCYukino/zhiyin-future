@@ -1,13 +1,14 @@
 # ===== 阶段 1：构建前端（Vite） =====
-FROM node:20-alpine AS frontend
+# pdfjs-dist 的锁定版本要求 Node >=22.13（或 >=24）。
+FROM node:22-alpine AS frontend
 WORKDIR /frontend
 COPY zcFrontend/package.json zcFrontend/package-lock.json ./
 # 国内镜像：避免默认 npm 源超时
-RUN npm install --no-audit --no-fund --registry=https://registry.npmmirror.com
+RUN npm ci --no-audit --no-fund --registry=https://registry.npmmirror.com
 COPY zcFrontend/ ./
 # 同源部署：前端请求相对路径 /api/v1，由同一容器内的 FastAPI 提供
 ENV VITE_API_BASE_URL=/api/v1
-RUN npx vite build
+RUN npm run build
 
 # ===== 阶段 2：后端（FastAPI 托管前端产物） =====
 FROM python:3.11-slim

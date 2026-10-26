@@ -1,7 +1,4 @@
-"""账号级 API Key 凭据解析：Key 存 SQLite，无 .env 回退、无跨账号回退。
-
-凭据解析基于鉴权 token 的用户，绝不基于可伪造的请求体字段。
-"""
+"""账号级 API Key 凭据解析：Key 存 SQLite，无 .env 回退、无跨账号回退。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

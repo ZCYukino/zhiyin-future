@@ -68,8 +68,8 @@
                 <span class="folio-no">{{ isLogin ? 'LOGIN' : 'REGISTER' }}</span>
               </div>
               <div class="mode-switch">
-                <button class="mode-tab" :class="{ active: isLogin }" @click="switchMode('login')">登录</button>
-                <button class="mode-tab" :class="{ active: !isLogin }" @click="switchMode('register')">注册</button>
+                <button class="mode-tab" :disabled="authPending" :class="{ active: isLogin }" @click="switchMode('login')">登录</button>
+                <button class="mode-tab" :disabled="authPending" :class="{ active: !isLogin }" @click="switchMode('register')">注册</button>
               </div>
             </div>
 
@@ -87,7 +87,8 @@
                 <span class="ribbon-item" v-for="s in steps" :key="s">{{ s }}</span>
               </div>
 
-              <form v-if="isLogin" class="form-area" :class="{ visible: formVisible }" @submit.prevent="handleAuth">
+              <p v-if="userStore.authError" role="alert">{{ userStore.authError }}</p>
+              <form v-if="isLogin" novalidate class="form-area" :class="{ visible: formVisible }" @submit.prevent="handleAuth">
                 <div class="field">
                   <div class="field-head">
                     <span class="field-label">{{ typedLabel1 }}<span class="blink-cursor" v-if="typingL1">|</span></span>
@@ -108,7 +109,7 @@
                 </div>
               </form>
 
-              <form v-else class="form-area" :class="{ visible: formVisible }" @submit.prevent="handleAuth">
+              <form v-else novalidate class="form-area" :class="{ visible: formVisible }" @submit.prevent="handleAuth">
                 <div class="field">
                   <div class="field-head">
                     <span class="field-label">{{ typedLabel1 }}<span class="blink-cursor" v-if="typingL1">|</span></span>
@@ -139,12 +140,12 @@
               </form>
 
               <div class="bottom-area" :class="{ visible: bottomVisible }">
-                <button class="action-line" @click="handleAuth">
+                <button class="action-line" :disabled="authPending" :aria-busy="authPending" @click="handleAuth">
                   <span class="action-dash"></span>
-                  <span class="action-text">{{ isLogin ? '进入工作台' : '创建账户' }}</span>
+                  <span class="action-text">{{ authPending ? '正在验证…' : isLogin ? '进入工作台' : '创建账户' }}</span>
                   <span class="action-dash"></span>
                 </button>
-                <button class="switch-btn" @click="switchMode(isLogin ? 'register' : 'login')">
+                <button class="switch-btn" :disabled="authPending" @click="switchMode(isLogin ? 'register' : 'login')">
                   {{ isLogin ? '还没有账号？立即注册' : '已有账号？立即登录' }}
                 </button>
               </div>
@@ -183,10 +184,10 @@ const floatingCareers = (() => {
 })()
 
 const metrics = [
-  { value: '30+', label: '核心岗位' },
+  { value: 'JD', label: '岗位采样与演示快照' },
   { value: '9', label: '岗位分类' },
-  { value: '270+', label: '技能点' },
-  { value: '68', label: '能力演化' },
+  { value: 'L1–L3', label: '技能分层' },
+  { value: 'AI', label: '能力演化推演' },
 ]
 
 const features = [
@@ -197,6 +198,7 @@ const features = [
 ]
 
 const isLogin = ref(true)
+const authPending = ref(false)
 const contentVisible = ref(false)
 const streamVisible = ref(false)
 const formVisible = ref(false)
@@ -277,6 +279,7 @@ function runSequence() {
 }
 
 function switchMode(mode: string) {
+  if (authPending.value) return
   const newIsLogin = mode === 'login'
   if (newIsLogin === isLogin.value) return
   isLogin.value = newIsLogin
@@ -287,6 +290,9 @@ function switchMode(mode: string) {
 }
 
 async function handleAuth() {
+  if (authPending.value) return
+  authPending.value = true
+  try {
   if (isLogin.value) {
     if (!loginForm.username || !loginForm.password) { ElMessage.warning('请输入用户名和密码'); return }
     try {
@@ -307,6 +313,9 @@ async function handleAuth() {
     } catch (err: any) {
       ElMessage.error(err?.message || '注册失败，请检查后端是否已启动')
     }
+  }
+  } finally {
+    authPending.value = false
   }
 }
 

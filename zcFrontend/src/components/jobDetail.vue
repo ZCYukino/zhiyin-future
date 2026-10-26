@@ -8,10 +8,12 @@ import {
   salaryRangeText,
   countText,
   MISSING_VALUE,
+  skillEvidenceLabel,
 } from '@/models'
-import type { JobItem, GraphNode, GraphEdge, CapabilityChange, SkillProgression, JobRequirement, JobIntro } from '@/models'
+import type { JobItem, GraphNode, GraphEdge, CapabilityChange, SkillProgression, JobRequirement, JobIntro, SkillEvidenceKind } from '@/models'
 import { services } from '@/services'
 import type { JobProfile } from '@/services'
+import { skillTrend } from '@/utils/skillIdentity'
 
 const props = defineProps<{ job: JobItem | null }>()
 const emit = defineEmits<{
@@ -27,6 +29,11 @@ const backendRequirement = ref<JobRequirement | null>(null)
 const backendProgression = ref<SkillProgression | null>(null)
 const profile = ref<JobProfile | null>(null)
 const introLoading = ref(false)
+const detailError = ref('')
+const referenceError = ref('')
+const referenceLoading = ref(false)
+let detailVersion = 0
+let disposed = false
 
 const detailNote = computed(() => {
   if (!props.job) return ''
@@ -59,12 +66,14 @@ const profileSkills = computed(() => profile.value?.skills || null)
 interface LevelSkill {
   name: string
   desc?: string
+  evidenceKind?: SkillEvidenceKind
   trend: 'up' | 'down' | 'stable' | 'new'
 }
-function toLevelSkills(specs: { name: string; desc?: string }[]): LevelSkill[] {
+function toLevelSkills(specs: { name: string; desc?: string; evidenceKind?: SkillEvidenceKind }[]): LevelSkill[] {
   return specs.map(s => ({
     name: s.name,
     desc: s.desc,
+    evidenceKind: s.evidenceKind,
     trend: skillTrendFor(s.name),
   }))
 }
@@ -120,37 +129,11 @@ const rawSkills = computed<string[]>(() => {
 })
 
 function skillTrendFor(skillName: string): 'up' | 'down' | 'stable' | 'new' {
-  if (!skillName) return 'stable'
-  const s = skillName.replace(/\s+/g, '').toLowerCase()
-  let up = false,
-    down = false,
-    added = false
-  for (const c of capabilityChanges.value) {
-    for (const a of c.addedSkills || []) {
-      if (a.replace(/\s+/g, '').toLowerCase().includes(s) || s.includes(a.replace(/\s+/g, '').toLowerCase())) {
-        added = true
-      }
-    }
-    for (const u of c.importanceUp || []) {
-      if (u.replace(/\s+/g, '').toLowerCase().includes(s) || s.includes(u.replace(/\s+/g, '').toLowerCase())) {
-        up = true
-      }
-    }
-    for (const d of c.importanceDown || []) {
-      if (d.replace(/\s+/g, '').toLowerCase().includes(s) || s.includes(d.replace(/\s+/g, '').toLowerCase())) {
-        down = true
-      }
-    }
-  }
-  if (added) return 'new'
-  if (up && !down) return 'up'
-  if (down && !up) return 'down'
-  if (up && down) return 'stable'
-  return 'stable'
+  return props.job && skillName ? skillTrend(capabilityChanges.value, props.job.id, skillName) : 'stable'
 }
 
 const evolutionChanges = computed<CapabilityChange[]>(() => {
-  if (!graphJobId.value || !props.job) return []
+  if (!props.job) return []
   return capabilityChanges.value
     .filter(c => c.jobId === props.job!.id)
     .sort((a, b) => (a.period < b.period ? 1 : -1))
@@ -265,30 +248,59 @@ function onAdjacentClick(jid: string) {
 }
 
 async function loadJobDetail(jobId: string) {
+  const version = ++detailVersion
+  const current = () => !disposed && version === detailVersion && props.job?.id === jobId
   backendIntro.value = null
   backendRequirement.value = null
   backendProgression.value = null
   profile.value = null
+  detailError.value = ''
   introLoading.value = true
-  const d = await services.getJobDetail(jobId).catch(() => null)
-  if (props.job?.id !== jobId) return
+  const d = await services.getJobDetail(jobId).catch(() => {
+    if (current()) detailError.value = '岗位详情读取失败。'
+    return null
+  })
+  if (!current()) return
   if (d?.intro) backendIntro.value = d.intro
   if (d?.requirements) backendRequirement.value = d.requirements
   if (d?.progression) backendProgression.value = d.progression
 
-  const p = await services.getJobProfile(jobId).catch(() => null)
-  if (props.job?.id !== jobId) return
+  const p = await services.getJobProfile(jobId).catch(() => {
+    if (current()) detailError.value += '岗位画像读取失败。'
+    return null
+  })
+  if (!current()) return
   if (p && p.duties?.length) profile.value = p
   introLoading.value = false
 }
 
+async function loadReferenceData() {
+  if (disposed || referenceLoading.value) return
+  referenceLoading.value = true
+  const [g, cc] = await Promise.allSettled([services.getGraph(), services.getCapabilityChanges()])
+  if (disposed) return
+  const errors: string[] = []
+  if (g.status === 'fulfilled') graphData.value = g.value
+  else errors.push('关联图谱读取失败。')
+  if (cc.status === 'fulfilled') capabilityChanges.value = cc.value
+  else errors.push('能力演化读取失败。')
+  referenceError.value = errors.join('')
+  referenceLoading.value = false
+}
+
+async function retryData() {
+  await Promise.all([
+    detailError.value && props.job?.id && !introLoading.value ? loadJobDetail(props.job.id) : Promise.resolve(),
+    referenceError.value ? loadReferenceData() : Promise.resolve(),
+  ])
+}
+
 onMounted(async () => {
   document.addEventListener('click', onDocClick)
-  const [g, cc] = await Promise.all([services.getGraph(), services.getCapabilityChanges()])
-  if (g?.nodes?.length) graphData.value = g
-  if (cc?.length) capabilityChanges.value = cc
-
-  if (props.job?.id) loadJobDetail(props.job.id)
+  await Promise.all([
+    loadReferenceData(),
+    props.job?.id ? loadJobDetail(props.job.id) : Promise.resolve(),
+  ])
 })
 
 watch(
@@ -296,10 +308,16 @@ watch(
   id => {
     activeSkill.value = null
     if (id) loadJobDetail(id)
+    else {
+      detailVersion++
+      introLoading.value = false
+    }
   },
 )
 
 onBeforeUnmount(() => {
+  disposed = true
+  detailVersion++
   document.removeEventListener('click', onDocClick)
 })
 </script>
@@ -328,10 +346,15 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
+    <el-alert v-if="detailError || referenceError" :title="detailError + referenceError" type="warning" :closable="false" show-icon>
+      <p>已保留可用内容。</p>
+      <el-button text :loading="introLoading || referenceLoading" @click="retryData">重新加载</el-button>
+    </el-alert>
+
     <section class="metrics-grid">
       <div class="metric-cell paper-inner">
         <div class="metric-value">{{ salaryRangeText(job.salaryMin, job.salaryMax) }}<span
-          v-if="job.salaryMin != null && job.salaryMax != null" class="metric-unit">{{ job.salaryUnit }}</span></div>
+          v-if="job.salaryMin != null && job.salaryMax != null" class="metric-unit">{{ job.salaryUnit.replace(/^K(?=\/)/, '') }}</span></div>
         <div class="metric-label">薪资参考</div>
       </div>
       <div class="metric-cell paper-inner">
@@ -376,7 +399,7 @@ onBeforeUnmount(() => {
           <div class="intro-block paper-inner">
             <div class="intro-head">
               <span class="intro-caption">典型行业应用场景</span>
-              <span v-if="introLoading" class="intro-ai-badge">AI 生成中…</span>
+              <span v-if="introLoading" class="intro-loading-badge">内容加载中…</span>
             </div>
             <div v-if="jobIntro.scenarios.length" class="scenario-list">
               <div v-for="sc in jobIntro.scenarios" :key="sc.name" class="scenario-item">
@@ -412,6 +435,7 @@ onBeforeUnmount(() => {
         <div v-if="skillProgression || profileSkills" class="req-sub">
           <div class="sub-label">专业技能</div>
           <p class="sub-hint">按初 / 中 / 高三级资历梳理，必备 / 重要 / 加分 对应岗位定义要素；▲▼●✦ 标记近期市场趋势，点击技能查看介绍。</p>
+          <p class="sub-hint">“JD 抽取”来自招聘样本；“模型推断”为补充建议，不代表招聘方明确要求。两类技能均参与匹配评分。</p>
           <div class="progression-grid">
             <div v-for="col in levelColumns" :key="col.key" class="level-col">
               <div class="level-head">
@@ -424,6 +448,7 @@ onBeforeUnmount(() => {
                 <span v-for="s in col.skills" :key="s.name" class="skill-chip" :class="{ active: activeSkill === col.key + ':' + s.name }" @click="toggleSkill(col.key, s.name)">
                   <span class="chip-top">
                     <span class="chip-name">{{ s.name }}</span>
+                    <span class="skill-evidence">{{ skillEvidenceLabel(s.evidenceKind) }}</span>
                     <span class="trend-glyph" :style="{ color: trendMeta(s.trend).color }">{{ trendMeta(s.trend).glyph }}</span>
                   </span>
                   <transition name="skill-pop">
@@ -580,6 +605,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.skill-evidence {
+  font-size: 11px;
+  color: var(--color-text-regular);
+  white-space: normal;
+}
 .detail-root {
   font-family: v-bind("SERIF");
   position: relative;
@@ -939,7 +969,7 @@ onBeforeUnmount(() => {
   background: rgba(243, 230, 203, 0.35);
   letter-spacing: 0.3px;
 }
-.intro-ai-badge {
+.intro-loading-badge {
   margin-left: auto;
   font-size: 11px;
   color: #b45309;

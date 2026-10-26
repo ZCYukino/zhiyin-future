@@ -44,8 +44,11 @@
         </template>
       </div>
 
-      <div v-if="!allJobs.length" class="graph-empty">
-        图谱数据加载中，或后端服务未启动。
+      <el-alert v-if="dataError" :title="dataError" type="warning" :closable="false" show-icon role="alert">
+        <el-button size="small" :loading="dataLoading" @click="loadGraphData">重试读取图谱数据</el-button>
+      </el-alert>
+      <div v-if="!allJobs.length" class="graph-empty" role="status" :aria-busy="dataLoading">
+        {{ dataLoading ? '正在加载图谱数据…' : dataError ? '图谱暂不可用，请重试。' : '当前暂无图谱数据。' }}
       </div>
 
       <div v-if="allJobs.length" class="graph-main">
@@ -224,6 +227,7 @@
                   <span class="skill-meta-chip" :class="'pri-' + selectedSkillIntro?.priority">{{ selectedSkillIntro?.priorityLabel }}</span>
                   <span class="skill-meta-chip">{{ selectedSkillIntro?.levelWord }}</span>
                   <span class="skill-meta-chip">{{ stackNameOf(selectedSkillIntro?.stack) }}</span>
+                  <span class="skill-meta-chip">{{ skillEvidenceLabel(selectedSkillIntro?.evidenceKind) }}</span>
                 </div>
                 <div class="aside-section">
                   <p class="aside-section-label">也需要该技能的岗位（{{ skillOtherJobs.length }}个）</p>
@@ -243,7 +247,7 @@
                     <div class="aside-skill-list">
                       <div v-for="x in grp.items" :key="x.node.id" class="aside-skill-row">
                         <span class="aside-skill-name">{{ x.node.label }}</span>
-                        <span class="aside-skill-rel">{{ x.edge ? x.edge.label : (x.level ? levelWord(x.level) : '必备') }}</span>
+                        <span class="aside-skill-rel">{{ x.edge ? x.edge.label : (x.level ? levelWord(x.level) : '必备') }} · {{ skillEvidenceLabel(x.evidenceKind) }}</span>
                         <span class="aside-trend mini" :class="x.trend">{{ trendGlyph(x.trend) }}</span>
                       </div>
                     </div>
@@ -268,7 +272,7 @@
                   <span class="rel-legend-item"><span class="rel-line horizontal"></span>横向换岗 → 右侧</span>
                   <span class="rel-legend-item"><span class="rel-line vertical"></span>垂直晋升 → 上方</span>
                 </div>
-                <p class="aside-hint">在左侧列表点击一个岗位，即可看到它能「换岗」到哪些岗位，以及相对该岗位要求「✅ 已具备 / ➕ 所差」的技能点（按技能重合度排序）。岗位带「N 关系」角标表示存在晋升或换岗关系。</p>
+                <p class="aside-hint">在左侧列表点击一个岗位，即可看到它能「换岗」到哪些岗位，以及相对该岗位要求「✓ 已具备 / ＋ 所差」的技能点（按技能重合度排序）。岗位带「N 关系」角标表示存在晋升或换岗关系。</p>
               </div>
               <div class="aside-paper">
                 <h4 class="aside-title aside-title-aux">晋升阶梯 · 辅助参考</h4>
@@ -295,20 +299,20 @@
                       <span class="pivot-rel match">技能重合 {{ t.have.length }}/{{ t.have.length + t.diff.length }}</span>
                     </div>
                     <div v-if="t.have.length" class="skill-line">
-                      <span class="skill-line-label have">✅ 你已具备目标岗位所需</span>
+                      <span class="skill-line-label have">✓ 你已具备目标岗位所需</span>
                       <span v-for="sk in t.have" :key="'h' + sk" class="diff-chip have">{{ sk }}</span>
                     </div>
                     <div v-if="t.diff.length" class="skill-line">
-                      <span class="skill-line-label gap">➕ 目标岗位额外要求，你尚未掌握</span>
+                      <span class="skill-line-label gap">＋ 目标岗位额外要求，你尚未掌握</span>
                       <span v-for="sk in t.diff" :key="'g' + sk" class="diff-chip gap">{{ sk }}</span>
                     </div>
                     <div v-else-if="t.have.length" class="skill-line">
-                      <span class="skill-line-label have">✅ 技能已完全覆盖目标岗位要求</span>
+                      <span class="skill-line-label have">✓ 技能已完全覆盖目标岗位要求</span>
                     </div>
                     <div v-if="!t.have.length && !t.diff.length" class="pivot-diff empty">暂无该岗位技能要求数据。</div>
                   </div>
                 </div>
-                <div v-else class="aside-hint">暂无横向换岗关系。✅ 已具备 = 两岗位共同要求的技能；➕ 所差 = 目标岗位额外要求、当前岗位未覆盖的技能。</div>
+                <div v-else class="aside-hint">暂无横向换岗关系。✓ 已具备 = 两岗位共同要求的技能；＋ 所差 = 目标岗位额外要求、当前岗位未覆盖的技能。</div>
               </div>
               <div v-if="relationsAdvanceTo.length || relationsPromotedFrom.length" class="aside-paper">
                 <h4 class="aside-title aside-title-aux">垂直晋升 · 辅助</h4>
@@ -360,14 +364,16 @@
 
 <script setup lang="ts">
 import { Graph } from '@antv/g6'
-import { techStacksForGraph, changeReasonOf, capabilitySourceOf, inferStackFromName, priorityOf } from '@/models'
-import type { CapabilityChange, GraphEdge, GraphNode, JobItem, SkillProgression, SkillSpec, SkillStack } from '@/models'
+import { techStacksForGraph, changeReasonOf, capabilitySourceOf, inferStackFromName, priorityOf, skillEvidenceLabel } from '@/models'
+import type { CapabilityChange, GraphEdge, GraphNode, JobItem, SkillProgression, SkillSpec, SkillStack, SkillEvidenceKind } from '@/models'
 import { services } from '@/services'
 import { ElMessage } from 'element-plus'
+import { sameSkill, skillIdentity, skillTrend } from '@/utils/skillIdentity'
 
 type ViewMode = 'panorama' | 'relations' | 'evolution'
 type Level = 'junior' | 'mid' | 'senior'
 type Trend = 'up' | 'down' | 'stable'
+type PositionedNode = GraphNode & { x: number; y: number }
 
 const graphContainer = ref<HTMLElement>()
 let graph: Graph | null = null
@@ -394,11 +400,16 @@ interface CapSkill {
   source: 'graph' | 'progression'
   level: Level | null
   trend: Trend
+  evidenceKind?: SkillEvidenceKind
 }
 
 const graphData = ref<{ nodes: GraphNode[]; edges: GraphEdge[] }>({ nodes: [], edges: [] })
 const capabilityChanges = ref<CapabilityChange[]>([])
 const jobItems = ref<JobItem[]>([])
+const dataLoading = ref(false)
+const dataError = ref('')
+let dataVersion = 0
+let disposed = false
 
 const allJobs = computed(() => graphData.value.nodes.filter(n => n.type === 'job'))
 const allSkills = computed(() => graphData.value.nodes.filter(n => n.type === 'skill'))
@@ -480,7 +491,7 @@ function progressionOf(jobNode: GraphNode | null | undefined): SkillProgression 
 function findSkillId(changeStr: string): string | undefined {
   if (!changeStr) return undefined
   for (const s of allSkills.value) {
-    if (s.label.includes(changeStr) || changeStr.includes(s.label)) return s.id
+    if (sameSkill(s.label, changeStr)) return s.id
   }
   return undefined
 }
@@ -488,17 +499,9 @@ function findSkillId(changeStr: string): string | undefined {
 const skillTrendMap = computed(() => {
   const map = new Map<string, Trend>()
   allSkills.value.forEach(s => map.set(s.id, 'stable'))
-  const upSet = new Set<string>()
-  const downSet = new Set<string>()
-  capabilityChanges.value.forEach(c => {
-    c.importanceUp.forEach(sk => { const id = findSkillId(sk); if (id) upSet.add(id) })
-    c.addedSkills.forEach(sk => { const id = findSkillId(sk); if (id) upSet.add(id) })
-    c.importanceDown.forEach(sk => { const id = findSkillId(sk); if (id) downSet.add(id) })
-    c.removedSkills.forEach(sk => { const id = findSkillId(sk); if (id) downSet.add(id) })
-  })
   allSkills.value.forEach(s => {
-    const up = upSet.has(s.id), down = downSet.has(s.id)
-    map.set(s.id, up && !down ? 'up' : down && !up ? 'down' : 'stable')
+    const trend = skillTrend(capabilityChanges.value, focusJobNode.value?.jobId || '', s.label)
+    map.set(s.id, trend === 'new' ? 'up' : trend)
   })
   return map
 })
@@ -535,7 +538,7 @@ const focusJobAllSkills = computed<CapSkill[]>(() => {
         ;(node as any)._mStack = spec.stack
         if (seen.has(node.id)) return
         seen.add(node.id)
-        list.push({ node, edge: null, source: 'progression', level: key, trend: skillTrendMap.value.get(node.id) || 'stable' })
+        list.push({ node, edge: null, source: 'progression', level: key, trend: skillTrendMap.value.get(node.id) || 'stable', evidenceKind: spec.evidenceKind })
       })
     })
     return list
@@ -543,10 +546,10 @@ const focusJobAllSkills = computed<CapSkill[]>(() => {
 
   return graphData.value.edges
     .filter(e => e.source === jobId && e.target.startsWith('skill-'))
-    .map(e => {
+    .map((e): CapSkill | null => {
       const skill = allSkills.value.find(s => s.id === e.target)
       if (!skill) return null
-      return { node: skill, edge: e, source: 'graph' as const, level: null, trend: skillTrendMap.value.get(skill.id) || 'stable' }
+      return { node: skill, edge: e, source: 'graph' as const, level: null, trend: skillTrendMap.value.get(skill.id) || 'stable', evidenceKind: e.evidenceKind }
     })
     .filter((x): x is CapSkill => !!x)
 })
@@ -593,8 +596,7 @@ function skillDescOf(name: string): { desc?: string; stack?: SkillStack; level?:
   const n = name.replace(/\s+/g, '').toLowerCase()
   for (const { key, specs } of levels) {
     const spec = specs.find(s => {
-      const sn = s.name.replace(/\s+/g, '').toLowerCase()
-      return sn === n || sn.includes(n) || n.includes(sn)
+      return sameSkill(s.name, n)
     })
     if (spec) return { desc: spec.desc, stack: spec.stack, level: key }
   }
@@ -625,6 +627,7 @@ const selectedSkillIntro = computed(() => {
     priority: priorityOf(effectiveLevel),
     stack: (mStack || stack || ((sk as any)?.techStack as SkillStack) || inferStackFromName(mName)) as SkillStack,
     desc: mDesc || desc || '',
+    evidenceKind: focusJobAllSkills.value.find(x => x.node.id === sk.id)?.evidenceKind,
   }
 })
 
@@ -634,15 +637,16 @@ function skillsOfJob(jobId: string): Set<string> {
   if (prog) {
     const ids = new Set<string>()
     ;[...prog.junior, ...prog.mid, ...prog.senior].forEach(spec => {
-      const gid = findSkillId(spec.name)
-      if (gid) ids.add(gid)
+       ids.add(skillIdentity(spec.name))
     })
     if (ids.size) return ids
   }
   return new Set(
     graphData.value.edges
       .filter(e => e.source === jobId && e.target.startsWith('skill-'))
-      .map(e => e.target)
+      .map(e => allSkills.value.find(s => s.id === e.target)?.label)
+      .filter((name): name is string => !!name)
+      .map(skillIdentity)
   )
 }
 
@@ -668,7 +672,7 @@ const relationsTransferTo = computed(() => {
       const otherId = e.source === src ? e.target : e.source
       const other = allJobs.value.find(j => j.id === otherId)!
       const otherSkills = skillsOfJob(otherId)
-      const labelOf = (sid: string) => allSkills.value.find(s => s.id === sid)?.label || sid
+      const labelOf = (sid: string) => allSkills.value.find(s => skillIdentity(s.label) === sid)?.label || sid
       // 已具备=两岗位技能交集，所差=目标岗位独有
       const have = [...otherSkills].filter(sid => srcSkills.has(sid)).map(labelOf)
       const diff = [...otherSkills].filter(sid => !srcSkills.has(sid)).map(labelOf)
@@ -886,8 +890,9 @@ function edgeStyle(d: any): any {
 
 // 岗位居中，初/中/高三级各伸一条臂
 function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: GraphEdge[]; height: number } {
-  const job = focusJobNode.value
-  if (!job) return { nodes: [], edges: [], height: 400 }
+  const focusedJob = focusJobNode.value
+  if (!focusedJob) return { nodes: [], edges: [], height: 400 }
+  const job: PositionedNode = { ...focusedJob, x: 0, y: 0 }
   const baseR = 134 // 首个药丸距中心的半径
   const PER_ARM = 5 // 每条臂最多展示 5 个技能
   const pillH = (l: Level) => (l === 'junior' ? 36 : l === 'mid' ? 40 : 44)
@@ -944,7 +949,7 @@ function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: 
     return { arm, n, step, len }
   }).filter(p => p.n > 0)
 
-  const nodes: GraphNode[] = []
+  const nodes: PositionedNode[] = []
   const edges: GraphEdge[] = []
   job.x = 0
   job.y = 0
@@ -962,7 +967,7 @@ function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: 
     let prev: GraphNode = job
     list.forEach((x, k) => {
       const r = baseR + k * step
-      const node: GraphNode = { ...x.node, x: cos * r, y: sin * r }
+      const node: PositionedNode = { ...x.node, x: cos * r, y: sin * r }
       ;(node as any)._lvl = arm.key
       ;(node as any)._lvlColor = color
       ;(node as any)._disp = disp(x.node.label)
@@ -974,6 +979,7 @@ function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: 
       const edge: GraphEdge = {
         source: prev.id,
         target: node.id,
+        label: '',
         relation: 'level',
         weight: prev.id === job.id ? 3.0 : 2.1,
       }
@@ -1012,7 +1018,7 @@ function buildJobFocus(width: number, minH = 400): { nodes: GraphNode[]; edges: 
   return { nodes, edges, height }
 }
 
-/** 画布至少填满面板可见高度，否则拖动时内容会被提前裁切 */
+/** 画布至少填满面板可见高度 */
 function canvasMinHeight(): number {
   const panel = graphContainer.value?.parentElement as HTMLElement | null
   if (!panel) return 560
@@ -1022,6 +1028,7 @@ function canvasMinHeight(): number {
 }
 
 function initGraph() {
+  if (disposed) return
   if (!graphContainer.value) return
   if (!focusJob.value) {
     if (graph) { graph.destroy(); graph = null }
@@ -1155,7 +1162,6 @@ function jobPillW(j: GraphNode): number {
   return Math.min(150, Math.max(96, j.label.length * 13 + 32))
 }
 
-// 节点角色：center 当前岗位 / transfer 换岗目标 / advance 晋升
 function relationsNodeStyle(d: any): any {
   const node = d as GraphNode
   const kind = (node as any)._relKind || 'transfer'
@@ -1209,7 +1215,7 @@ function buildRelationsFocusLayout(width: number, minH = 320): { nodes: GraphNod
   const upList = relationsAdvanceTo.value
   const downList = relationsPromotedFrom.value
 
-  const nodes: GraphNode[] = []
+  const nodes: PositionedNode[] = []
   const edges: GraphEdge[] = []
 
   const rowGap = 88
@@ -1220,7 +1226,7 @@ function buildRelationsFocusLayout(width: number, minH = 320): { nodes: GraphNod
 
   const armSpan = Math.max(0, transfers.length - 1) * rowGap
   const hwOf = (n: GraphNode) => ((n as any)._relW || 120) / 2
-  const rowW = (list: typeof transfers) => list.reduce((s, t) => s + jobPillW(t.job), 0) + colGap * Math.max(0, list.length - 1)
+  const rowW = (list: { job: GraphNode }[]) => list.reduce((s, t) => s + jobPillW(t.job), 0) + colGap * Math.max(0, list.length - 1)
 
   nodes.push({ ...src, x: 0, y: 0, _relW: jobPillW(src) + 24, _relKind: 'center' } as any)
 
@@ -1275,6 +1281,7 @@ function buildRelationsFocusLayout(width: number, minH = 320): { nodes: GraphNod
 }
 
 function initRelationsGraph() {
+  if (disposed) return
   if (!graphContainer.value) return
   const focus = relationsFocusNode.value
   if (!focus) {
@@ -1361,21 +1368,42 @@ function initRelationsGraph() {
   graph.on('canvas:click', () => { relationsHighlight.value = null })
 }
 
-onMounted(async () => {
+async function loadGraphData() {
+  if (disposed || dataLoading.value) return
+  const version = ++dataVersion
+  dataLoading.value = true
   try {
-    const [g, cc, jobs] = await Promise.all([
+    const [g, cc, jobs] = await Promise.allSettled([
       services.getGraph(),
       services.getCapabilityChanges(),
       services.getJobs(),
     ])
-    if (g?.nodes?.length) graphData.value = g
-    if (cc?.length) capabilityChanges.value = cc
-    if (jobs?.length) jobItems.value = jobs
-  } catch { /* 后端异常时数据保持为空 */ }
-  if (allJobs.value.length) nextTick(() => initGraph())
-})
+    if (disposed || version !== dataVersion) return
+    if (g.status === 'fulfilled') graphData.value = g.value
+    if (cc.status === 'fulfilled') capabilityChanges.value = cc.value
+    if (jobs.status === 'fulfilled') jobItems.value = jobs.value
+    const failures = [
+      g.status === 'rejected' ? '岗位图谱' : '',
+      cc.status === 'rejected' ? '能力演化' : '',
+      jobs.status === 'rejected' ? '岗位详情' : '',
+    ].filter(Boolean)
+    dataError.value = failures.length ? `${failures.join('、')}读取失败；已保留成功读取的数据。` : ''
+    if (focusJob.value && !allJobs.value.some(job => job.id === focusJob.value)) focusJob.value = null
+    if (relationsFocus.value && !allJobs.value.some(job => job.id === relationsFocus.value)) relationsFocus.value = null
+    await nextTick()
+    if (disposed || version !== dataVersion) return
+    if (viewMode.value === 'relations') initRelationsGraph()
+    else initGraph()
+  } finally {
+    if (version === dataVersion) dataLoading.value = false
+  }
+}
+
+onMounted(loadGraphData)
 
 onUnmounted(() => {
+  disposed = true
+  dataVersion++
   if (graph) { graph.destroy(); graph = null }
 })
 </script>

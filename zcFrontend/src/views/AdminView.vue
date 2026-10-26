@@ -20,7 +20,7 @@
         </div>
         <p class="card-desc">
           点击「刷新项目数据」后，后端将在后台线程依次执行：爬虫采集原始 JD → 数据清洗 →
-          LLM 结构化抽取 → 知识库组装 → 向量化索引 → 快照落盘 → 岗位画像富化。完成后全站数据即时更新。
+          LLM 结构化抽取 → 知识库组装 → 岗位画像富化 → 准备向量索引 → 发布完整快照。完成后重新进入相关页面即可读取最新数据。
         </p>
         <div class="stage-strip">
           <div v-for="(s, i) in STAGE_STEPS" :key="s" class="stage-item" :class="stepState(i)">
@@ -38,7 +38,7 @@
         <div class="refresh-row">
           <button
             class="refresh-btn"
-            :disabled="status?.running || starting || keysMissing"
+            :disabled="status?.running || starting || keysLoading || keysLoadFailed || keysMissing || statusLoading"
             @click="handleRefresh"
           >
             <IconEpRefresh :class="{ spinning: status?.running }" class="refresh-icon" />
@@ -51,7 +51,7 @@
             <template v-else-if="keysLoading">正在读取 Key 状态…</template>
             <template v-else-if="keysLoadFailed">
               Key 状态读取失败，请检查后端服务后
-              <a class="hint-link" @click="refreshKeys">重试</a>。
+              <button type="button" class="hint-link" @click="refreshKeys">重试</button>。
             </template>
             <template v-else-if="keysMissing">
               刷新前请先配置下方
@@ -62,6 +62,11 @@
             </template>
             <template v-else>全量刷新耗时较长（含 LLM 抽取与画像生成），请耐心等待。</template>
           </span>
+        </div>
+
+        <div v-if="statusError" class="error-alert" role="alert">
+          <p>{{ statusError }}。保留上次状态，正在自动重试。</p>
+          <el-button :loading="statusLoading" @click="retryStatus">重试读取刷新状态</el-button>
         </div>
 
         <div v-if="status && (status.running || status.progress > 0)" class="progress-panel">
@@ -79,6 +84,14 @@
         </div>
 
         <div v-if="status?.result" class="result-panel">
+          <div v-if="status.result.newCount != null" class="result-item">
+            <span class="result-val">{{ status.result.newCount }}</span>
+            <span class="result-label">本轮新增真实 JD</span>
+          </div>
+          <div v-if="status.result.archiveCount != null" class="result-item">
+            <span class="result-val">{{ status.result.archiveCount }}</span>
+            <span class="result-label">累计真实 JD</span>
+          </div>
           <div class="result-item">
             <span class="result-val">{{ status.result.jobCount }}</span>
             <span class="result-label">岗位总数</span>
@@ -88,16 +101,36 @@
             <span class="result-label">完整画像</span>
           </div>
           <div v-if="status.finishedAt" class="result-finished">完成于 {{ status.finishedAt }}</div>
+          <p v-if="status.result.rawCount != null" class="result-finished">
+            本轮返回 {{ status.result.rawCount }} 条，清洗去重后 {{ status.result.cleanedCount ?? '—' }} 条，
+            正文更新 {{ status.result.updatedCount ?? 0 }} 条，复用既有抽取 {{ status.result.reusedCount ?? 0 }} 条。
+          </p>
+          <p v-if="status.result.duplicateCount" class="result-finished">本轮同来源 URL 重复返回 {{ status.result.duplicateCount }} 条，已去重。</p>
+          <p v-if="status.result.unchanged" class="result-finished">本轮未发现数据变化，已复用现有完整快照与索引。</p>
+          <p v-if="status.result.retainedExtractionCount" class="result-finished">{{ status.result.retainedExtractionCount }} 条正文更新抽取失败，保留上次成功证据。</p>
+          <p v-if="status.result.sourceCounts" class="result-finished">
+            <span v-for="(count, source) in status.result.sourceCounts" :key="source">
+              {{ sourceLabel(String(source)) }} {{ count }} 条 ·
+            </span>
+          </p>
+          <p v-if="status.result.sampled" class="result-finished">
+            本轮为固定关键词限额采样，单关键词最多 {{ status.result.maxPages ?? '—' }} 页、{{ status.result.limitPerKeyword ?? '—' }} 条；不代表全站新增总量。
+          </p>
+          <el-alert v-if="hasPartialFailures" title="刷新已结束，部分来源或岗位处理失败；请查看下列明细。" type="warning" :closable="false" show-icon />
           <div
             v-if="(status.result.failedJobs?.length || status.result.failedProfiles?.length)"
             class="failed-panel"
           >
             <p class="failed-title">
-              ⚠ {{ (status.result.failedJobs?.length || 0) + (status.result.failedProfiles?.length || 0) }} 项处理失败
+              {{ (status.result.failedJobs?.length || 0) + (status.result.failedProfiles?.length || 0) }} 项抽取 / 画像处理失败
             </p>
             <p class="failed-list">
               {{ [...(status.result.failedJobs || []), ...(status.result.failedProfiles || [])].join('、') }}
             </p>
+          </div>
+          <div v-if="status.result.failedSources?.length" class="failed-panel">
+            <p class="failed-title">采集来源异常</p>
+            <p v-for="source in status.result.failedSources" :key="source" class="failed-list">{{ source }}</p>
           </div>
         </div>
 
@@ -147,12 +180,27 @@ import { services } from '@/services'
 import type { RefreshStatus } from '@/services'
 import { useUserStore } from '@/stores/user'
 import { useApiKeyStatus } from '@/composables/useApiKeyStatus'
+import { captureSession, isCurrentSession } from '@/utils/session'
+import { useDataStatus } from '@/composables/useDataStatus'
 
 const userStore = useUserStore()
+const { load: loadDataStatus } = useDataStatus()
 
 const status = ref<RefreshStatus | null>(null)
 const starting = ref(false)
+const statusLoading = ref(false)
+const statusError = ref('')
 let timer: number | null = null
+let disposed = false
+let pollingAllowed = true
+const hasPartialFailures = computed(() => {
+  const result = status.value?.result
+  return !!(result?.failedJobs?.length || result?.failedProfiles?.length || result?.failedSources?.length)
+})
+
+function sourceLabel(source: string) {
+  return ({ mohrss: '中国公共招聘网', iguopin: '国聘' } as Record<string, string>)[source] || source
+}
 
 const dsKeys = useApiKeyStatus('deepseek')
 const dcKeys = useApiKeyStatus('dashscope')
@@ -174,9 +222,8 @@ const STAGE_STEPS = [
   '清洗数据',
   'LLM 结构化抽取',
   '组装知识库',
-  '向量化索引',
-  '快照落盘',
   '岗位画像富化',
+  '向量化索引',
   '刷新完成',
 ]
 
@@ -195,55 +242,78 @@ function stepState(i: number): 'done' | 'active' | 'pending' {
   return 'pending'
 }
 
-/** skipKeys=true 用于 2s 轮询，省掉重复的 Key 回读 */
-async function fetchStatus(skipKeys = false) {
+/** 同一时刻只允许一个请求，慢响应不能触发下一次轮询。 */
+async function fetchStatus(): Promise<boolean> {
+  if (disposed || statusLoading.value) return false
+  const session = captureSession()
+  statusLoading.value = true
   try {
-    status.value = await services.getAdminRefreshStatus()
+    const current = await services.getAdminRefreshStatus()
+    if (disposed || !isCurrentSession(session)) return false
+    const completed = !current.running && !!current.finishedAt && current.finishedAt !== status.value?.finishedAt
+    status.value = current
+    statusError.value = ''
     if (!status.value.running) stopPolling()
-    if (!skipKeys) await refreshKeys()
+    if (completed) void loadDataStatus(true)
+    return true
   } catch (err: any) {
-    if (err instanceof TypeError) return
+    if (disposed || !isCurrentSession(session)) return false
+    statusError.value = err?.message || '刷新状态读取失败'
     if (err?.status === 401 || err?.status === 403) {
+      pollingAllowed = false
       stopPolling()
       ElMessage.warning(err?.message || '登录已过期，请重新登录')
     }
-    /* 其他错误保持静默，下一轮轮询重试 */
+    return false
+  } finally {
+    statusLoading.value = false
   }
 }
 
 function startPolling() {
-  if (timer) return
-  timer = window.setInterval(() => fetchStatus(true), 2000)
+  if (timer || disposed || !pollingAllowed) return
+  timer = window.setTimeout(async () => {
+    timer = null
+    await fetchStatus()
+    if (status.value?.running || statusError.value) startPolling()
+  }, 2000)
 }
 
 function stopPolling() {
   if (timer) {
-    window.clearInterval(timer)
+    window.clearTimeout(timer)
     timer = null
   }
 }
 
+async function retryStatus() {
+  pollingAllowed = true
+  await fetchStatus()
+  if (status.value?.running || statusError.value) startPolling()
+}
+
 async function handleRefresh() {
-  if (starting.value) return
+  if (starting.value || status.value?.running || keysLoading.value || keysMissing.value || keysLoadFailed.value) return
   starting.value = true
   try {
     await services.adminRefresh()
     ElMessage.success('数据刷新已启动，正在后台执行')
     await fetchStatus()
-    startPolling()
+    if (status.value?.running || statusError.value) startPolling()
   } catch (err: any) {
     ElMessage.error(err?.message || '刷新启动失败')
+    if (err?.status === 409) await retryStatus()
   } finally {
     starting.value = false
   }
 }
 
 onMounted(async () => {
-  await fetchStatus()
-  if (status.value?.running) startPolling()
+  await Promise.all([fetchStatus(), refreshKeys()])
+  if (status.value?.running || statusError.value) startPolling()
 })
 
-onUnmounted(stopPolling)
+onUnmounted(() => { disposed = true; stopPolling() })
 </script>
 
 <style scoped>

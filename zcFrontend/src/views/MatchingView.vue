@@ -15,7 +15,7 @@
               <h3 class="card-section-title">选择岗位</h3>
               <div class="card-divider"></div>
 
-              <el-select v-model="selectedJobId" filterable placeholder="搜索并选择目标岗位..." class="job-select"
+              <el-select v-model="selectedJobId" filterable :disabled="analyzing" placeholder="搜索并选择目标岗位..." class="job-select"
                 popper-class="job-select-popper" @change="onJobChange">
                 <el-option v-for="job in allJobs" :key="job.id" :label="job.name" :value="job.id">
                   <div class="select-option">
@@ -38,12 +38,12 @@
 
               <div class="resume-upload-area">
                 <div class="upload-tabs">
-                  <button :class="['tab-btn', uploadMode === 'file' && 'active']" @click="uploadMode = 'file'">上传文件</button>
-                  <button :class="['tab-btn', uploadMode === 'text' && 'active']" @click="uploadMode = 'text'">粘贴文本</button>
+                  <button :disabled="analyzing" :class="['tab-btn', uploadMode === 'file' && 'active']" @click="uploadMode = 'file'">上传文件</button>
+                  <button :disabled="analyzing" :class="['tab-btn', uploadMode === 'text' && 'active']" @click="uploadMode = 'text'">粘贴文本</button>
                 </div>
 
                 <div v-if="uploadMode === 'file'">
-                  <input ref="fileInput" type="file" accept=".pdf,.doc,.docx,.txt,.md" style="display:none"
+                  <input ref="fileInput" type="file" :disabled="analyzing" accept=".pdf,.docx,.txt,.md" style="display:none"
                     @change="handleFileChange" />
                   <div v-if="!resumeUploaded" class="upload-zone" @click="triggerUpload">
                     <IconEpUpload class="upload-icon" />
@@ -58,17 +58,17 @@
                         <span class="resume-file-hint" :class="parseError ? 'hint-error' : ''">{{ parseError || '简历已选择 · 开始分析时解析' }}</span>
                       </div>
                     </div>
-                    <button class="resume-reupload" @click="triggerUpload">
+                    <button class="resume-reupload" :disabled="analyzing" @click="triggerUpload">
                       <IconEpRefresh /> 重新上传
                     </button>
                   </div>
                 </div>
 
                 <div v-else class="paste-zone">
-                  <textarea v-model="pasteText" class="paste-textarea" rows="5"
+                  <textarea v-model="pasteText" :disabled="analyzing" class="paste-textarea" rows="5" style="resize: none"
                     placeholder="将简历文本粘贴到此处，例如：张三，本科，3年Python经验，熟悉机器学习、大模型（LLM）与RAG…"></textarea>
                   <div class="paste-actions">
-                    <button class="parse-btn" @click="parseTextInput">使用该文本</button>
+                    <button class="parse-btn" :disabled="analyzing" @click="parseTextInput">使用该文本</button>
                   </div>
                 </div>
               </div>
@@ -94,8 +94,8 @@
 
               <div v-if="analyzing" class="analyzing-panel">
                 <div class="analyzing-spinner"></div>
-                <p class="analyzing-title">正在生成匹配报告</p>
-                <p class="analyzing-desc">AI 正逐项对照技能矩阵，通常约需 1 分钟，请稍候…</p>
+                <p class="analyzing-title">{{ preparing ? '正在解析并保存简历' : '正在生成匹配报告' }}</p>
+                <p class="analyzing-desc">系统正逐项对照技能矩阵，通常约需 1 分钟，请稍候…</p>
               </div>
 
               <div v-else-if="!hasReport" class="report-empty">
@@ -111,7 +111,7 @@
                 </button>
               </div>
 
-              <div v-else class="report-body">
+              <div v-else-if="report" class="report-body">
                 <div class="verdict-hero" :class="`hero-${report.verdict}`">
                   <div class="hero-stamp">人岗匹配</div>
                   <div class="hero-score-row">
@@ -152,6 +152,7 @@
                         <div v-for="s in report.skillCoverage.mastered" :key="'m' + s.name" class="skill-chip chip-mastered">
                           <span class="chip-glyph">✓</span>
                           <span class="chip-name">{{ s.name }}</span>
+                          <span class="chip-level">{{ skillEvidenceLabel(s.evidenceKind) }}</span>
                           <span class="chip-pri" :class="'pri-' + s.priority">{{ priLabel(s.priority) }}</span>
                           <span class="chip-level">L{{ levelNum(s.level) }}</span>
                         </div>
@@ -164,6 +165,7 @@
                         <div v-for="s in report.skillCoverage.partial" :key="'p' + s.name" class="skill-chip chip-partial">
                           <span class="chip-glyph">◐</span>
                           <span class="chip-name">{{ s.name }}</span>
+                          <span class="chip-level">{{ skillEvidenceLabel(s.evidenceKind) }}</span>
                           <span class="chip-pri" :class="'pri-' + s.priority">{{ priLabel(s.priority) }}</span>
                           <span class="chip-level">L{{ levelNum(s.level) }}</span>
                         </div>
@@ -176,6 +178,7 @@
                         <div v-for="s in report.skillCoverage.missing" :key="'g' + s.name" class="skill-chip chip-missing">
                           <span class="chip-glyph">✕</span>
                           <span class="chip-name">{{ s.name }}</span>
+                          <span class="chip-level">{{ skillEvidenceLabel(s.evidenceKind) }}</span>
                           <span class="chip-pri" :class="'pri-' + s.priority">{{ priLabel(s.priority) }}</span>
                           <span class="chip-level">L{{ levelNum(s.level) }}</span>
                         </div>
@@ -184,6 +187,8 @@
                     </div>
                   </div>
                 </div>
+
+                <p class="report-evidence-note">技能来源逐项标注。模型推断的补充技能参与评分，不代表招聘方明确要求；未标注来源的旧数据不作事实认定。</p>
 
                 <div class="report-section" v-if="report?.requirements?.length">
                   <div class="section-title">
@@ -286,7 +291,7 @@
 <script setup lang="ts">
 import { useUserStore } from '@/stores/user'
 import { useAnalysisStore } from '@/stores/analysis'
-import { salaryRangeText } from '@/models'
+import { salaryRangeText, skillEvidenceLabel } from '@/models'
 import type { JobItem, SkillLevel, SkillPriority, SkillStatus } from '@/models'
 import { flattenSkillTerms, skillEvidenceMap } from '@/utils/resumeParser'
 import type { ResumeParseResult } from '@/utils/resumeParser'
@@ -295,6 +300,7 @@ import { useApiKeyStatus } from '@/composables/useApiKeyStatus'
 import { ElMessage } from 'element-plus'
 import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
+import { captureSession, isCurrentSession } from '@/utils/session'
 
 const userStore = useUserStore()
 const analysisStore = useAnalysisStore()
@@ -306,7 +312,9 @@ let scoreTimer: ReturnType<typeof setInterval> | null = null
 
 // editing 时临时隐藏已存报告，回到选择界面
 const editing = ref(false)
-const analyzing = computed(() => analysisStore.matchingLoading)
+const preparing = ref(false)
+const analyzing = computed(() => preparing.value || analysisStore.matchingLoading)
+let disposed = false
 const report = computed(() => analysisStore.matchReport)
 const hasReport = computed(() => !editing.value && !!report.value && selectedJobId.value === analysisStore.matchJobId)
 
@@ -378,8 +386,7 @@ async function applyParseResult(result: ResumeParseResult): Promise<boolean> {
     ElMessage.error('简历保存失败，请检查后端是否已启动')
     return false
   }
-  await analysisStore.clearMatchReport()
-  await analysisStore.clearAbilityProfile()
+  analysisStore.reset()
   return true
 }
 
@@ -437,6 +444,10 @@ async function runAnalysis() {
     return
   }
 
+  const session = captureSession()
+  const job = selectedJob.value
+  preparing.value = true
+  try {
   if (pendingFile.value || (uploadMode.value === 'text' && pasteText.value.trim())) {
     let result: ResumeParseResult
     try {
@@ -448,16 +459,20 @@ async function runAnalysis() {
       ElMessage.error(parseError.value)
       return
     }
-    // 保存失败必须中止，否则库里的旧简历与内存里的新技能对不上
+    if (disposed || !isCurrentSession(session)) return
+    // 保存失败必须中止
     if (!(await applyParseResult(result))) return
     user = userStore.userInfo ?? user
     pendingFile.value = null
   }
+  if (disposed || !isCurrentSession(session)) return
 
   cardVisable.value = false
   editing.value = false
 
-  await analysisStore.generateMatchReport(selectedJob.value, user)
+  preparing.value = false
+  await analysisStore.generateMatchReport(job, user)
+  if (disposed || !isCurrentSession(session)) return
   if (analysisStore.matchingError) {
     cardVisable.value = true
     ElMessage.error(analysisStore.matchingError)
@@ -482,10 +497,12 @@ async function runAnalysis() {
       displayScore.value = current
     }
   }, 30)
+  } finally {
+    preparing.value = false
+  }
 }
 
 
-// PDF 导出：拼打印文档 HTML → html2canvas 长图 → 逐页合成 A4 画布 → jsPDF
 let pdfExporting = false
 async function exportPDF() {
   if (pdfExporting) return
@@ -533,7 +550,7 @@ async function exportPDF() {
 
   const chip = (s: SkillStatus, kind: 'm' | 'p' | 'g') => {
     const glyph = kind === 'm' ? '✓' : kind === 'p' ? '◐' : '✕'
-    return `<span class="chip chip-${kind}"><span class="chip-glyph">${glyph}</span><span class="chip-name">${esc(s.name)}</span><span class="chip-pri pri-${s.priority}">${priLabel(s.priority)}</span><span class="chip-level">L${levelNum(s.level)}</span></span>`
+    return `<span class="chip chip-${kind}"><span class="chip-glyph">${glyph}</span><span class="chip-name">${esc(s.name)}</span><span class="chip-level">${skillEvidenceLabel(s.evidenceKind)}</span><span class="chip-pri pri-${s.priority}">${priLabel(s.priority)}</span><span class="chip-level">L${levelNum(s.level)}</span></span>`
   }
   const covGroup = (title: string, glyph: string, kind: 'm' | 'p' | 'g', items: SkillStatus[]) => `
     <div class="cov-group">
@@ -543,6 +560,7 @@ async function exportPDF() {
   const section2 = `
     <div class="section">
       <div class="section-head"><span class="sec-num">02</span><span class="sec-title">技能覆盖矩阵</span></div>
+      <p>技能来源逐项标注；模型推断项参与评分，不代表招聘方明确要求。</p>
       <div class="cov-stats">
         <span class="cov-stat"><i class="s-mastered">✓</i> 已掌握 ${coverage.mastered.length}</span>
         <span class="cov-stat"><i class="s-partial">◐</i> 部分掌握 ${coverage.partial.length}</span>
@@ -748,7 +766,7 @@ async function exportPDF() {
   const printHeightMm = pageHeight - margin * 2
 
   try {
-    // 量算章节高度插撑高，避免标题孤悬页尾
+    // 章节前插撑高，避免标题孤立在页尾
     const scale = 2
     const domPxPerMm = 800 / printWidthMm          // 800px 容器的 px/mm 换算
     const pageContentDomPx = printHeightMm * domPxPerMm
@@ -860,11 +878,17 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
   if (scoreTimer) clearInterval(scoreTimer)
 })
 </script>
 
 <style scoped>
+.report-evidence-note {
+  color: var(--color-text-regular);
+  font-size: 12px;
+  line-height: 1.7;
+}
 .matching-page {
   height: calc(100vh - 56px);
   display: flex;
@@ -2054,6 +2078,7 @@ onUnmounted(() => {
   }
 
   .sidebar-hidden {
+    display: none;
     max-width: 0 !important;
     margin-bottom: 0 !important;
     opacity: 0;
@@ -2087,6 +2112,7 @@ onUnmounted(() => {
 }
 
 @media (max-width: 600px) {
+  .report-header, .report-actions, .req-row { flex-wrap: wrap; }
   .hero-title {
     font-size: 22px;
     letter-spacing: 4px;

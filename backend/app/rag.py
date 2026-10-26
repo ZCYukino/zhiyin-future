@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from . import settings
+from . import settings, store
 from .llm import LLMNotConfigured, embed
 from .store import col_lock, get_collection
 
@@ -13,6 +13,9 @@ logger = logging.getLogger("rag")
 
 def search(query: str, top_k: int = 6) -> list[dict[str, Any]]:
     """向量检索相关 JD 片段。未配置 Key 抛 LLMNotConfigured（配置问题不静默）；网络异常/空库返回空。"""
+    collection_name = (store.load_cached_snapshot().get("meta") or {}).get("vectorCollection")
+    if not collection_name:
+        return []  # 老快照/种子没有绑定索引，不读取来源不明的全局集合。
     try:
         # embedding 在锁外执行；显式传管理员百炼 Key
         qe = embed([query], credentials=settings.embed_credentials())[0]
@@ -22,7 +25,7 @@ def search(query: str, top_k: int = 6) -> list[dict[str, Any]]:
         logger.warning("向量检索失败，本次降级为空结果（query=%r）：%s", query, e)
         return []
     with col_lock:
-        col = get_collection()
+        col = get_collection(collection_name)
         count = col.count()
         if count == 0:
             return []
@@ -47,6 +50,6 @@ def build_context(query: str, top_k: int = 6) -> str:
         return ""
     parts: list[str] = []
     for i, h in enumerate(hits, 1):
-        src = h["meta"].get("source", "未知来源")
+        src = h["meta"].get("url") or h["meta"].get("source", "未知来源")
         parts.append(f"[{i}]（来源：{src}）\n{h['text']}")
     return "\n\n".join(parts)
